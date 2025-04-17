@@ -1,0 +1,54 @@
+[
+  {
+    "id": 1,
+    "title": "Tech Fest 2025",
+    "cover_image": "https://via.placeholder.com/300x150.png?text=Tech+Fest",
+    "description": "A grand technology festival featuring workshops, hackathons, and tech talks.",
+    "organizer": "Tech Club",
+    "location": "In College",
+    "od_provided": true,
+    "duration": "2 Days",
+    "enrollment_criteria": "Open to all students",
+    "registration_link": "https://example.com/register/techfest",
+    "price": 50
+  },
+  {
+    "id": 2,
+    "title": "Cultural Night",
+    "cover_image": "https://via.placeholder.com/300x150.png?text=Cultural+Night",
+    "description": "An evening of music, dance, and cultural performances.",
+    "organizer": "Cultural Committee",
+    "location": "In College",
+    "od_provided": false,
+    "duration": "4 Hours",
+    "enrollment_criteria": "Open to all",
+    "registration_link": "https://example.com/register/culturalnight",
+    "price": 0
+  },
+  {
+    "id": 3,
+    "title": "National Hackathon",
+    "cover_image": "https://via.placeholder.com/300x150.png?text=Hackathon",
+    "description": "A 24-hour coding competition with teams from across the country.",
+    "organizer": "Coding Club",
+    "location": "Outside College",
+    "od_provided": true,
+    "duration": "24 Hours",
+    "enrollment_criteria": "Teams of 2-4, coding experience required",
+    "registration_link": "https://example.com/register/hackathon",
+    "price": 100
+  },
+  {
+    "id": 4,
+    "title": "Guest Lecture Series",
+    "cover_image": "https://via.placeholder.com/300x150.png?text=Lecture",
+    "description": "Lectures by industry experts on emerging technologies.",
+    "organizer": "Academic Council",
+    "location": "In College",
+    "od_provided": true,
+    "duration": "3 Hours",
+    "enrollment_criteria": "Open to final-year students",
+    "registration_link": "https://example.com/register/lecture",
+    "price": 0
+  }
+]
