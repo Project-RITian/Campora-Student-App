@@ -111,7 +111,7 @@ class MyApp extends StatelessWidget {
         '/settings': (context) => const SettingsScreen(),
         '/arcade': (context) => const ArcadeScreen(),
         '/canteen': (context) => const CanteenScreen(),
-        '/payment': (context) => const PaymentScreen(
+        '/payment': (context) => PaymentScreen(
               file: null,
               copies: 1,
               isColor: false,
@@ -121,6 +121,7 @@ class MyApp extends StatelessWidget {
               stationeryItems: [],
               foodCart: {},
               foodItems: [],
+              isTakeaway: false, // Added isTakeaway parameter
             ),
         '/payment-success': (context) => const PaymentSuccessScreen(),
         '/under-construction': (context) => const UnderConstructionScreen(),

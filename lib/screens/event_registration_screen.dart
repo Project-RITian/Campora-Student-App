@@ -23,7 +23,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     {
       "id": 1,
       "title": "Tech Fest 2025",
-      "cover_image": "https://via.placeholder.com/300x150.png?text=Tech+Fest",
+      "cover_image": "https://www.lingayasvidyapeeth.edu.in/sanmax/wp-content/uploads/2025/02/Lingayass-Tech-Fest-2025.png",
       "description":
           "A grand technology festival featuring workshops, hackathons, and tech talks.",
       "organizer": "Tech Club",
@@ -31,7 +31,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       "od_provided": true,
       "duration": "2 Days",
       "enrollment_criteria": "Open to all students",
-      "registration_link": "https://www.google.com", // Valid URL for testing
+      "registration_link": "https://www.google.com",
       "price": 50
     },
     {
@@ -45,7 +45,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       "od_provided": false,
       "duration": "4 Hours",
       "enrollment_criteria": "Open to all",
-      "registration_link": "https://www.example.com", // Valid URL for testing
+      "registration_link": "https://www.example.com",
       "price": 0
     },
     {
@@ -59,7 +59,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       "od_provided": true,
       "duration": "24 Hours",
       "enrollment_criteria": "Teams of 2-4, coding experience required",
-      "registration_link": "https://www.github.com", // Valid URL for testing
+      "registration_link": "https://www.github.com",
       "price": 100
     },
     {
@@ -72,7 +72,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       "od_provided": true,
       "duration": "3 Hours",
       "enrollment_criteria": "Open to final-year students",
-      "registration_link": "https://www.flutter.dev", // Valid URL for testing
+      "registration_link": "https://www.flutter.dev",
       "price": 0
     }
   ];
@@ -100,7 +100,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16.0)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20.0)),
       ),
       builder: (context) {
         return DraggableScrollableSheet(
@@ -109,78 +109,115 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
           maxChildSize: 0.9,
           expand: false,
           builder: (context, scrollController) {
-            return SingleChildScrollView(
-              controller: scrollController,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8.0),
-                      child: Image.network(
-                        event.coverImage,
-                        height: 150,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const Icon(Icons.error, size: 50),
+            return Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20.0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 12,
+                    offset: const Offset(0, -6),
+                  ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                controller: scrollController,
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12.0),
+                        child: Image.network(
+                          event.coverImage,
+                          height: 180,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Icon(Icons.error,
+                                  size: 50, color: Colors.grey),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      event.title,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: 16),
+                      Text(
+                        event.title,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0C4D83),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      event.description,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Organizer: ${event.organizer}',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Location: ${event.location}',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'OD Provided: ${event.odProvided ? 'Yes' : 'No'}',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Duration: ${event.duration}',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Enrollment Criteria: ${event.enrollmentCriteria}',
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Price: ${event.price == 0 ? 'Free' : '${event.price} RITZ'}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                      const SizedBox(height: 12),
+                      Text(
+                        event.description,
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.black87),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Center(
-                      child: ElevatedButton(
-                        onPressed: () => _registerForEvent(context, event),
-                        child: const Text('Register'),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Organizer: ${event.organizer}',
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.black87),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      Text(
+                        'Location: ${event.location}',
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'OD Provided: ${event.odProvided ? 'Yes' : 'No'}',
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Duration: ${event.duration}',
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Enrollment Criteria: ${event.enrollmentCriteria}',
+                        style: const TextStyle(
+                            fontSize: 16, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Price: ${event.price == 0 ? 'Free' : '${event.price} RITZ'}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Center(
+                        child: ElevatedButton(
+                          onPressed: () => _registerForEvent(context, event),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.teal,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12.0)),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 14.0, horizontal: 30.0),
+                            elevation: 6,
+                          ),
+                          child: const Text(
+                            'Register',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -246,51 +283,96 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Event Registration')),
+      appBar: CustomNavigationDrawer.buildAppBar(context, 'Event Registration'),
       drawer: const CustomNavigationDrawer(),
-      body: _events.isEmpty
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              padding: const EdgeInsets.all(16.0),
-              itemCount: _events.length,
-              itemBuilder: (context, index) {
-                final event = _events[index];
-                return Card(
-                  elevation: 4,
-                  margin: const EdgeInsets.only(bottom: 16.0),
-                  child: InkWell(
-                    onTap: () => _showEventDetails(context, event),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(8.0)),
-                          child: Image.network(
-                            event.coverImage,
-                            height: 150,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Icon(Icons.error, size: 50),
+      body: Container(
+        color: Colors.white, // White background
+        child: _events.isEmpty
+            ? const Center(
+                child: CircularProgressIndicator(color: Color(0xFF0C4D83)))
+            : ListView.builder(
+                padding: const EdgeInsets.all(16.0),
+                itemCount: _events.length,
+                itemBuilder: (context, index) {
+                  final event = _events[index];
+                  return Card(
+                    elevation: 6,
+                    margin: const EdgeInsets.only(bottom: 16.0),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16.0)),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16.0),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Text(
-                            event.title,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                        ],
+                      ),
+                      child: InkWell(
+                        onTap: () => _showEventDetails(context, event),
+                        borderRadius: BorderRadius.circular(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(16.0)),
+                              child: Image.network(
+                                event.coverImage,
+                                height: 150,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    const Icon(Icons.error,
+                                        size: 50, color: Colors.grey),
+                              ),
                             ),
-                          ),
+                            Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Text(
+                                event.title,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0C4D83),
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12.0),
+                              child: Text(
+                                event.description,
+                                style: const TextStyle(
+                                    fontSize: 14, color: Colors.black54),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Text(
+                                'Price: ${event.price == 0 ? 'Free' : '${event.price} RITZ'}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
+                  );
+                },
+              ),
+      ),
     );
   }
 }
