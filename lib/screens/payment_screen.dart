@@ -1,29 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/stationery_item.dart';
 import '../models/food_item.dart';
 import '../widgets/custom_navigation_drawer.dart';
 import 'payment_success_screen.dart';
 import 'ritz_purchase_screen.dart';
-
-// Simple user balance management (replace with backend or state management)
-class UserBalance {
-  static double _ritzBalance = 1000; // Initial balance for testing
-
-  static double get balance => _ritzBalance;
-
-  static void addRitz(double amount) {
-    _ritzBalance += amount;
-  }
-
-  static bool deductRitz(double amount) {
-    if (_ritzBalance >= amount) {
-      _ritzBalance -= amount;
-      return true;
-    }
-    return false;
-  }
-}
 
 class PaymentScreen extends StatefulWidget {
   final File? file;
@@ -35,7 +18,7 @@ class PaymentScreen extends StatefulWidget {
   final List<StationeryItem> stationeryItems;
   final Map<int, int> foodCart;
   final List<FoodItem> foodItems;
-  final bool isTakeaway; // Added isTakeaway parameter
+  final bool isTakeaway;
 
   const PaymentScreen({
     super.key,
@@ -48,7 +31,7 @@ class PaymentScreen extends StatefulWidget {
     required this.stationeryItems,
     required this.foodCart,
     required this.foodItems,
-    required this.isTakeaway, // Required parameter
+    required this.isTakeaway,
   });
 
   @override
@@ -104,37 +87,51 @@ class _PaymentScreenState extends State<PaymentScreen>
     return total;
   }
 
-  void _processPayment() {
-    final total = _calculateTotal();
-    if (UserBalance.deductRitz(total)) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const PaymentSuccessScreen()),
-      );
-    } else {
+  Future<bool> _processPayment() async {
+    final user = fb_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Insufficient RITZ balance'),
-          backgroundColor: Colors.redAccent,
-          action: SnackBarAction(
-            label: 'Buy RITZ',
-            textColor: Colors.white,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const RitzPurchaseScreen()),
-              );
-            },
-          ),
-        ),
+        const SnackBar(content: Text('Please log in to make a payment')),
       );
+      return false;
+    }
+
+    final total = _calculateTotal();
+    try {
+      final balanceRef =
+          FirebaseFirestore.instance.collection('user_balances').doc(user.uid);
+      return await FirebaseFirestore.instance
+          .runTransaction((transaction) async {
+        final snapshot = await transaction.get(balanceRef);
+        double currentBalance = 0.0;
+        if (snapshot.exists) {
+          currentBalance =
+              (snapshot.data()?['balance'] as num?)?.toDouble() ?? 0.0;
+        }
+
+        if (currentBalance < total) {
+          return false; // Insufficient balance
+        }
+
+        final newBalance = currentBalance - total;
+        transaction.set(
+            balanceRef, {'balance': newBalance}, SetOptions(merge: true));
+        return true;
+      });
+    } catch (e) {
+      print('Error processing payment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error processing payment')),
+      );
+      return false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final total = _calculateTotal();
+    final user = fb_auth.FirebaseAuth.instance.currentUser;
+
     return Scaffold(
       appBar: CustomNavigationDrawer.buildAppBar(context, 'Payment'),
       drawer: const CustomNavigationDrawer(),
@@ -373,68 +370,85 @@ class _PaymentScreenState extends State<PaymentScreen>
                       ),
                     ),
                   // Total and Balance
-                  Container(
-                    padding: const EdgeInsets.all(16.0),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.95),
-                      borderRadius: BorderRadius.circular(16.0),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Total',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF0C4D83),
-                              ),
-                            ),
-                            Text(
-                              '$total RITZ',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.teal[300],
-                              ),
+                  StreamBuilder<DocumentSnapshot>(
+                    stream: user != null
+                        ? FirebaseFirestore.instance
+                            .collection('user_balances')
+                            .doc(user.uid)
+                            .snapshots()
+                        : null,
+                    builder: (context, snapshot) {
+                      double balance = 0.0;
+                      if (snapshot.hasData && snapshot.data!.exists) {
+                        balance =
+                            (snapshot.data!['balance'] as num?)?.toDouble() ??
+                                0.0;
+                      }
+
+                      return Container(
+                        padding: const EdgeInsets.all(16.0),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.95),
+                          borderRadius: BorderRadius.circular(16.0),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Available Balance',
-                              style: TextStyle(
-                                  fontSize: 16, color: Colors.black87),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Total',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF0C4D83),
+                                  ),
+                                ),
+                                Text(
+                                  '$total RITZ',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.teal[300],
+                                  ),
+                                ),
+                              ],
                             ),
-                            Text(
-                              '${UserBalance.balance} RITZ',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: UserBalance.balance >= total
-                                    ? Colors.green
-                                    : Colors.redAccent,
-                                fontWeight: FontWeight.w600,
-                              ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Available Balance',
+                                  style: TextStyle(
+                                      fontSize: 16, color: Colors.black87),
+                                ),
+                                Text(
+                                  '$balance RITZ',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: balance >= total
+                                        ? Colors.green
+                                        : Colors.redAccent,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                  const SizedBox(height: 80), // Space for floating button
+                  const SizedBox(height: 80), // Space for floating buttons
                 ],
               ),
             ),
@@ -442,7 +456,35 @@ class _PaymentScreenState extends State<PaymentScreen>
               bottom: 16.0,
               right: 16.0,
               child: GestureDetector(
-                onTap: _processPayment,
+                onTap: () async {
+                  final success = await _processPayment();
+                  if (success) {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const PaymentSuccessScreen()),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Insufficient RITZ balance'),
+                        backgroundColor: Colors.redAccent,
+                        action: SnackBarAction(
+                          label: 'Buy RITZ',
+                          textColor: Colors.white,
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) =>
+                                      const RitzPurchaseScreen()),
+                            );
+                          },
+                        ),
+                      ),
+                    );
+                  }
+                },
                 child: AnimatedBuilder(
                   animation: _buttonScaleAnimation,
                   builder: (context, child) {

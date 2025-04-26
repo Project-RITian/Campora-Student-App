@@ -6,6 +6,7 @@ class User {
   final String department;
   final String className;
   final String year;
+  final String regdNumber;
 
   User({
     required this.email,
@@ -13,6 +14,7 @@ class User {
     required this.department,
     required this.className,
     required this.year,
+    required this.regdNumber,
   });
 }
 
@@ -28,11 +30,12 @@ class UserProvider with ChangeNotifier {
 
   void setUserFromJson(Map<String, dynamic> userData) {
     _user = User(
-      email: userData['email'],
-      name: userData['name'],
-      department: userData['department'],
-      className: userData['class'],
-      year: userData['year'],
+      email: userData['email']?.toString() ?? '',
+      name: userData['name']?.toString() ?? 'Unknown',
+      department: userData['department']?.toString() ?? '',
+      className: userData['class']?.toString() ?? '',
+      year: userData['year']?.toString() ?? '',
+      regdNumber: userData['regdNumber']?.toString() ?? '',
     );
     notifyListeners();
   }

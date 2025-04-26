@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ritian_v1/models/event.dart';
-import 'package:ritian_v1/screens/payment_screen.dart';
 import 'package:ritian_v1/widgets/custom_navigation_drawer.dart';
 import 'package:ritian_v1/screens/ritz_purchase_screen.dart';
 import 'package:ritian_v1/screens/payment_success_screen.dart';
@@ -23,7 +24,8 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     {
       "id": 1,
       "title": "Tech Fest 2025",
-      "cover_image": "https://www.lingayasvidyapeeth.edu.in/sanmax/wp-content/uploads/2025/02/Lingayass-Tech-Fest-2025.png",
+      "cover_image":
+          "https://www.lingayasvidyapeeth.edu.in/sanmax/wp-content/uploads/2025/02/Lingayass-Tech-Fest-2025.png",
       "description":
           "A grand technology festival featuring workshops, hackathons, and tech talks.",
       "organizer": "Tech Club",
@@ -227,19 +229,62 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
     );
   }
 
+  Future<bool> _checkAndDeductBalance(double price) async {
+    final user = fb_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Please log in to register for the event')),
+      );
+      return false;
+    }
+
+    try {
+      final balanceRef =
+          FirebaseFirestore.instance.collection('user_balances').doc(user.uid);
+      return await FirebaseFirestore.instance
+          .runTransaction((transaction) async {
+        final snapshot = await transaction.get(balanceRef);
+        double currentBalance = 0.0;
+        if (snapshot.exists) {
+          currentBalance =
+              (snapshot.data()?['balance'] as num?)?.toDouble() ?? 0.0;
+        }
+
+        if (currentBalance < price) {
+          return false; // Insufficient balance
+        }
+
+        final newBalance = currentBalance - price;
+        transaction.set(
+            balanceRef, {'balance': newBalance}, SetOptions(merge: true));
+        return true;
+      });
+    } catch (e) {
+      print('Error checking/deducting balance: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error processing registration')),
+      );
+      return false;
+    }
+  }
+
   void _registerForEvent(BuildContext context, Event event) async {
     if (event.price > 0) {
-      // Paid event: Check RITZ balance
-      if (UserBalance.deductRitz(event.price)) {
+      // Paid event: Check and deduct RITZ balance
+      final success = await _checkAndDeductBalance(event.price.toDouble());
+      if (success) {
         // Payment successful, proceed to registration
-        _launchRegistrationLink(context, event);
+        await _launchRegistrationLink(context, event);
       } else {
         // Insufficient balance
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Insufficient RITZ balance'),
+            backgroundColor: Colors.redAccent,
             action: SnackBarAction(
               label: 'Buy RITZ',
+              textColor: Colors.white,
               onPressed: () {
                 Navigator.push(
                   context,
@@ -253,11 +298,12 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       }
     } else {
       // Free event: Directly launch registration link
-      _launchRegistrationLink(context, event);
+      await _launchRegistrationLink(context, event);
     }
   }
 
-  void _launchRegistrationLink(BuildContext context, Event event) async {
+  Future<void> _launchRegistrationLink(
+      BuildContext context, Event event) async {
     final Uri url = Uri.parse(event.registrationLink);
     print('Attempting to launch URL: ${event.registrationLink}'); // Debug log
     try {
@@ -286,7 +332,7 @@ class _EventRegistrationScreenState extends State<EventRegistrationScreen> {
       appBar: CustomNavigationDrawer.buildAppBar(context, 'Event Registration'),
       drawer: const CustomNavigationDrawer(),
       body: Container(
-        color: Colors.white, // White background
+        color: Colors.white,
         child: _events.isEmpty
             ? const Center(
                 child: CircularProgressIndicator(color: Color(0xFF0C4D83)))

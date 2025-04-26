@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:file_picker/file_picker.dart';
 import 'package:ritian_v1/widgets/custom_navigation_drawer.dart';
 import '../models/stationery_item.dart';
@@ -16,8 +17,7 @@ class _ArcadeScreenState extends State<ArcadeScreen>
     with SingleTickerProviderStateMixin {
   File? _selectedFile;
   int _copies = 1;
-  String _printType =
-      'B/W'; // Changed from bool _isColor to String for dropdown
+  String _printType = 'B/W';
   String _printSide = 'Single Sided';
   String _customInstructions = '';
   final List<StationeryItem> _stationeryItems = [
@@ -102,6 +102,23 @@ class _ArcadeScreenState extends State<ArcadeScreen>
     }
   }
 
+  double _calculateTotalCost() {
+    double total = 0.0;
+    // Handle xerox costs (aligned with PaymentScreen)
+    if (_selectedFile != null) {
+      total += _copies * (_printType == 'B/W' ? 1.0 : 2.0); // RITZ per copy
+      if (_printSide == 'Single Sided') {
+        total *= 0.9; // 10% discount for single-sided
+      }
+    }
+    // Handle stationery items
+    for (var entry in _stationeryCart.entries) {
+      final item = _stationeryItems.firstWhere((i) => i.id == entry.key);
+      total += item.price * entry.value;
+    }
+    return total;
+  }
+
   void _proceedToPayment() {
     if (_selectedFile == null && _stationeryCart.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -111,22 +128,29 @@ class _ArcadeScreenState extends State<ArcadeScreen>
       );
       return;
     }
+
+    final totalCost = _calculateTotalCost();
+    if (totalCost <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items to purchase')),
+      );
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PaymentScreen(
           file: _selectedFile,
           copies: _copies,
-          isColor: _printType ==
-              'Color', // Map _printType to isColor for PaymentScreen
+          isColor: _printType == 'Color',
           printSide: _printSide,
           customInstructions: _customInstructions,
           stationeryCart: _stationeryCart,
           stationeryItems: _stationeryItems,
           foodCart: {},
           foodItems: [],
-          isTakeaway:
-              false, // Added to match PaymentScreen's required parameter
+          isTakeaway: false,
         ),
       ),
     );
@@ -516,7 +540,7 @@ class _ArcadeScreenState extends State<ArcadeScreen>
                   ),
                 ),
               ),
-              const SizedBox(height: 80), // Space for floating button
+              const SizedBox(height: 80),
             ],
           ),
         ),
