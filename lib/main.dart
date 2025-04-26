@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'package:ritian_v1/screens/purchase_history_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ritian_v1/screens/arcade_screen.dart';
 import 'package:ritian_v1/screens/canteen_screen.dart';
@@ -155,6 +156,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   const UnderConstructionScreen(),
               '/exam_results': (context) => const UnderConstructionScreen(),
               '/fee_details': (context) => const UnderConstructionScreen(),
+              '/purchase_history': (context) => const PurchaseHistoryScreen(),
               '/bus_tracking': (context) => const UnderConstructionScreen(),
             };
 

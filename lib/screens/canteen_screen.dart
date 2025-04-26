@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'dart:math';
 import '../models/food_item.dart';
 import '../widgets/custom_navigation_drawer.dart';
 import 'payment_screen.dart';
@@ -21,6 +22,8 @@ class _CanteenScreenState extends State<CanteenScreen>
   bool _isTakeaway = false;
   double? userBalance;
   bool isLoading = true;
+  bool _isProcessingPayment = false;
+  bool _isLoggingPurchase = false;
 
   final List<FoodItem> _foodItems = [
     FoodItem(
@@ -96,7 +99,13 @@ class _CanteenScreenState extends State<CanteenScreen>
         vsync: this, duration: const Duration(milliseconds: 200));
     _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
         CurvedAnimation(parent: _buttonController, curve: Curves.bounceOut));
+    // Enable Firestore offline persistence
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+    );
     _fetchUserBalance();
+    // Test Firestore connectivity
+    _testFirestore();
   }
 
   @override
@@ -105,10 +114,23 @@ class _CanteenScreenState extends State<CanteenScreen>
     super.dispose();
   }
 
+  Future<void> _testFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('test')
+            .doc('ping')
+            .set({'timestamp': FieldValue.serverTimestamp()});
+        print('Firestore test write successful');
+      } catch (e) {
+        print('Firestore test write failed: $e');
+      }
+    }
+  }
+
   Future<void> _fetchUserBalance() async {
     final user = FirebaseAuth.instance.currentUser;
-    print(
-        'Current user: ${user?.uid ?? "No user signed in"}'); // Debug: Log user ID
     if (user == null) {
       setState(() {
         isLoading = false;
@@ -123,19 +145,11 @@ class _CanteenScreenState extends State<CanteenScreen>
     try {
       final docRef =
           FirebaseFirestore.instance.collection('user_balances').doc(user.uid);
-      print(
-          'Fetching balance from Firestore: user_balances/${user.uid}/balance'); // Debug: Log path
       final doc = await docRef.get();
-      print(
-          'Firestore document exists: ${doc.exists}'); // Debug: Check document existence
-      print(
-          'Firestore document data: ${doc.data()}'); // Debug: Log document data
 
       if (doc.exists && doc.data() != null) {
         final data = doc.data()!;
         if (!data.containsKey('balance') || data['balance'] == null) {
-          print(
-              'Balance field missing or null in user_balances/${user.uid}, setting to 100.0'); // Debug: Log missing balance
           await docRef.set({'balance': 100.0}, SetOptions(merge: true));
           setState(() {
             userBalance = 100.0;
@@ -150,21 +164,14 @@ class _CanteenScreenState extends State<CanteenScreen>
           balanceValue = balanceData.toDouble();
         } else if (balanceData is String) {
           balanceValue = double.tryParse(balanceData) ?? 0.0;
-          print(
-              'Balance is string: "$balanceData", parsed to: $balanceValue'); // Debug: Log string parsing
         } else {
-          print(
-              'Invalid balance type: ${balanceData.runtimeType}, setting to 0.0'); // Debug: Log invalid type
           balanceValue = 0.0;
         }
-        print('Parsed balance: $balanceValue'); // Debug: Log parsed balance
         setState(() {
           userBalance = balanceValue;
           isLoading = false;
         });
       } else {
-        print(
-            'No document found for user ${user.uid}, creating new document with balance 100.0'); // Debug: Log document creation
         await docRef.set({'balance': 100.0});
         setState(() {
           userBalance = 100.0;
@@ -172,7 +179,7 @@ class _CanteenScreenState extends State<CanteenScreen>
         });
       }
     } catch (e) {
-      print('Error fetching balance: $e'); // Debug: Log error
+      print('Error fetching balance: $e');
       setState(() {
         isLoading = false;
         userBalance = 0.0;
@@ -183,33 +190,113 @@ class _CanteenScreenState extends State<CanteenScreen>
     }
   }
 
-  // Temporary method to reset balance to 965.0 for debugging
-  Future<void> _resetBalance() async {
+  Future<String> _generateUniquePin(String userId) async {
+    final random = Random();
+    final purchasesRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('purchases');
+    List<String> existingPins = [];
+
+    try {
+      final querySnapshot = await purchasesRef.get();
+      existingPins =
+          querySnapshot.docs.map((doc) => doc['pin'] as String).toList();
+    } catch (e) {
+      print('Error fetching existing PINs: $e');
+    }
+
+    String newPin;
+    int attempts = 0;
+    const maxAttempts = 10;
+    do {
+      newPin = (100 + random.nextInt(900)).toString();
+      attempts++;
+      if (attempts >= maxAttempts) {
+        throw Exception(
+            'Failed to generate unique PIN after $maxAttempts attempts');
+      }
+    } while (existingPins.contains(newPin));
+
+    return newPin;
+  }
+
+  Future<void> _logPurchase() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to reset balance')),
+        const SnackBar(content: Text('Please sign in to log purchase')),
       );
       return;
     }
 
+    setState(() {
+      _isLoggingPurchase = true;
+    });
+
     try {
-      final docRef =
-          FirebaseFirestore.instance.collection('user_balances').doc(user.uid);
-      print(
-          'Resetting balance to 965.0 for user ${user.uid}'); // Debug: Log reset attempt
-      await docRef.set({'balance': 965.0}, SetOptions(merge: true));
-      print(
-          'Balance reset to 965.0, refreshing balance'); // Debug: Log reset success
-      await _fetchUserBalance();
+      print('Logging purchase for user: ${user.uid}');
+      final purchasesRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('purchases');
+      final totalCost = _calculateTotalCost();
+      final pin = await _generateUniquePin(user.uid);
+
+      final items = _foodCart.entries.map((entry) {
+        final item = _foodItems.firstWhere((food) => food.id == entry.key);
+        return {
+          'id': item.id,
+          'name': item.name,
+          'price': item.price,
+          'quantity': entry.value,
+        };
+      }).toList();
+
+      if (items.isEmpty) {
+        throw Exception('No items in cart to log');
+      }
+
+      final purchaseData = {
+        'type': 'canteen',
+        'pin': pin,
+        'items': items,
+        'totalCost': totalCost,
+        'isTakeaway': _isTakeaway,
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+
+      print('Purchase data: $purchaseData');
+
+      // Retry logic for Firestore write
+      const maxRetries = 3;
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          await purchasesRef.add(purchaseData);
+          print('Purchase logged successfully with PIN: $pin');
+          break;
+        } catch (e) {
+          print('Attempt $attempt failed: $e');
+          if (attempt == maxRetries) {
+            throw Exception(
+                'Failed to log purchase after $maxRetries attempts: $e');
+          }
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Balance reset to 965.0 RITZ')),
+        const SnackBar(content: Text('Purchase logged successfully')),
       );
     } catch (e) {
-      print('Error resetting balance: $e'); // Debug: Log error
+      print('Error logging purchase: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error resetting balance: $e')),
+        SnackBar(content: Text('Error logging purchase: $e')),
       );
+    } finally {
+      setState(() {
+        _isLoggingPurchase = false;
+      });
     }
   }
 
@@ -247,8 +334,6 @@ class _CanteenScreenState extends State<CanteenScreen>
     }
 
     final totalCost = _calculateTotalCost();
-    print(
-        'Total cost: $totalCost, User balance: $userBalance'); // Debug: Log cost and balance
     if (totalCost <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No items to purchase')),
@@ -256,10 +341,7 @@ class _CanteenScreenState extends State<CanteenScreen>
       return;
     }
 
-    // Refresh balance if it's 0 or null to ensure accuracy
     if (userBalance == null || userBalance == 0.0) {
-      print(
-          'Balance is 0 or null, attempting to refresh'); // Debug: Log refresh attempt
       await _fetchUserBalance();
       if (userBalance == null || userBalance == 0.0) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -285,10 +367,16 @@ class _CanteenScreenState extends State<CanteenScreen>
       return;
     }
 
-    // Navigate to PaymentScreen without deducting balance
-    _buttonController.forward().then((_) {
-      _buttonController.reverse();
-      Navigator.push(
+    setState(() {
+      _isProcessingPayment = true;
+    });
+
+    try {
+      print('Navigating to PaymentScreen');
+      await _buttonController.forward();
+      await _buttonController.reverse();
+
+      final result = await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => PaymentScreen(
@@ -304,14 +392,25 @@ class _CanteenScreenState extends State<CanteenScreen>
             isTakeaway: _isTakeaway,
           ),
         ),
-      ).then((_) {
-        // Refresh balance and clear cart after returning from PaymentScreen
-        _fetchUserBalance();
-        setState(() {
-          _foodCart.clear();
-        });
+      );
+
+      print('PaymentScreen returned: $result');
+      // Log purchase regardless of result, assuming PaymentScreen handles balance
+      await _logPurchase();
+      await _fetchUserBalance();
+      setState(() {
+        _foodCart.clear();
       });
-    });
+    } catch (e) {
+      print('Navigation or payment error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error during payment: $e')),
+      );
+    } finally {
+      setState(() {
+        _isProcessingPayment = false;
+      });
+    }
   }
 
   List<FoodItem> _getFilteredItems(String category) {
@@ -354,7 +453,6 @@ class _CanteenScreenState extends State<CanteenScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Balance Display
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
                       child: Text(
@@ -367,7 +465,6 @@ class _CanteenScreenState extends State<CanteenScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Total Cost Display
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
                       child: Text(
@@ -380,7 +477,6 @@ class _CanteenScreenState extends State<CanteenScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Search Bar
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
                       child: TextField(
@@ -406,7 +502,6 @@ class _CanteenScreenState extends State<CanteenScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Food Items
                     ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
@@ -533,7 +628,6 @@ class _CanteenScreenState extends State<CanteenScreen>
                       },
                     ),
                     const SizedBox(height: 16),
-                    // Takeaway Toggle
                     SwitchListTile(
                       title: const Text(
                         'Takeaway (+3 RITZ)',
@@ -556,68 +650,70 @@ class _CanteenScreenState extends State<CanteenScreen>
                 ),
               ),
             ),
-      floatingActionButton: GestureDetector(
-        onTap: _proceedToPayment,
-        child: AnimatedBuilder(
-          animation: _buttonScaleAnimation,
-          builder: (context, child) {
-            return Transform.scale(
-              scale: _buttonScaleAnimation.value,
-              child: Container(
-                height: 60,
-                width: 60,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF0C4D83), Color(0xFF64B5F6)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 8,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      const Icon(
-                        Icons.shopping_cart,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                      if (totalItems > 0)
-                        Positioned(
-                          top: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              totalItems.toString(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
+      floatingActionButton: _isProcessingPayment || _isLoggingPurchase
+          ? const CircularProgressIndicator()
+          : GestureDetector(
+              onTap: _proceedToPayment,
+              child: AnimatedBuilder(
+                animation: _buttonScaleAnimation,
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _buttonScaleAnimation.value,
+                    child: Container(
+                      height: 60,
+                      width: 60,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF0C4D83), Color(0xFF64B5F6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                    ],
-                  ),
-                ),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 8,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            const Icon(
+                              Icons.shopping_cart,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                            if (totalItems > 0)
+                              Positioned(
+                                top: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    totalItems.toString(),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-            );
-          },
-        ),
-      ),
+            ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }

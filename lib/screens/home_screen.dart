@@ -43,6 +43,12 @@ class HomeScreen extends StatelessWidget {
         'route': '/details',
         'icon': FontAwesomeIcons.chartLine
       },
+      {
+        'text': 'My Purchases',
+        'color': Colors.red,
+        'route': '/purchase_history',
+        'icon': FontAwesomeIcons.history
+      },
     ];
 
     final List<Map<String, dynamic>> resourcesManagement = [
