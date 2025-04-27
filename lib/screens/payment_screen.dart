@@ -16,11 +16,11 @@ class PaymentScreen extends StatefulWidget {
   final String customInstructions;
   final Map<int, int> stationeryCart;
   final List<StationeryItem> stationeryItems;
-  final Map<int, int> foodCart;
+  final Map<String, int> foodCart;
   final List<FoodItem> foodItems;
   final bool isTakeaway;
 
-  const PaymentScreen({
+const PaymentScreen({
     super.key,
     this.file,
     required this.copies,
@@ -29,7 +29,7 @@ class PaymentScreen extends StatefulWidget {
     required this.customInstructions,
     required this.stationeryCart,
     required this.stationeryItems,
-    required this.foodCart,
+    required this.foodCart, // Now accepts Map<String, int>
     required this.foodItems,
     required this.isTakeaway,
   });
