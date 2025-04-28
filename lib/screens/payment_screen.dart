@@ -20,7 +20,7 @@ class PaymentScreen extends StatefulWidget {
   final List<FoodItem> foodItems;
   final bool isTakeaway;
 
-const PaymentScreen({
+  const PaymentScreen({
     super.key,
     this.file,
     required this.copies,
@@ -29,7 +29,7 @@ const PaymentScreen({
     required this.customInstructions,
     required this.stationeryCart,
     required this.stationeryItems,
-    required this.foodCart, // Now accepts Map<String, int>
+    required this.foodCart,
     required this.foodItems,
     required this.isTakeaway,
   });
@@ -63,26 +63,22 @@ class _PaymentScreenState extends State<PaymentScreen>
 
   double _calculateTotal() {
     double total = 0;
-    // Handle xerox costs
     if (widget.file != null) {
-      total += widget.copies * (widget.isColor ? 2.0 : 1.0); // RITZ per copy
+      total += widget.copies * (widget.isColor ? 2.0 : 1.0);
       if (widget.printSide == 'Single Sided') {
-        total *= 0.9; // 10% discount for single-sided
+        total *= 0.9;
       }
     }
-    // Handle stationery items
     widget.stationeryCart.forEach((id, qty) {
       final item = widget.stationeryItems.firstWhere((item) => item.id == id);
       total += item.price * qty;
     });
-    // Handle food items
     widget.foodCart.forEach((id, qty) {
       final item = widget.foodItems.firstWhere((item) => item.id == id);
       total += item.price * qty;
     });
-    // Add takeaway charge
     if (widget.isTakeaway) {
-      total += 3.0; // Extra 3 RITZ for takeaway
+      total += 3.0;
     }
     return total;
   }
@@ -90,39 +86,129 @@ class _PaymentScreenState extends State<PaymentScreen>
   Future<bool> _processPayment() async {
     final user = fb_auth.FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in to make a payment')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in to make a payment')),
+        );
+      }
+      debugPrint('No user logged in');
       return false;
     }
 
+    debugPrint('User authenticated: ${user.uid}, Email: ${user.email}');
     final total = _calculateTotal();
+    debugPrint('Total to deduct: $total RITZ');
+    debugPrint('Food cart before payment: ${widget.foodCart}');
+    debugPrint('Stationery cart before payment: ${widget.stationeryCart}');
+
     try {
       final balanceRef =
           FirebaseFirestore.instance.collection('user_balances').doc(user.uid);
-      return await FirebaseFirestore.instance
-          .runTransaction((transaction) async {
+
+      // Initialize balance document if it doesn't exist
+      final balanceSnapshot = await balanceRef.get();
+      if (!balanceSnapshot.exists ||
+          balanceSnapshot.data()?['balance'] == null) {
+        await balanceRef.set({'balance': 965.0}, SetOptions(merge: true));
+        debugPrint(
+            'Initialized/Updated balance to 965.0 RITZ for user: ${user.uid}');
+        // Force StreamBuilder to refresh
+        await Future.delayed(Duration(milliseconds: 100));
+      }
+
+      bool success = false;
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
         final snapshot = await transaction.get(balanceRef);
-        double currentBalance = 0.0;
-        if (snapshot.exists) {
-          currentBalance =
-              (snapshot.data()?['balance'] as num?)?.toDouble() ?? 0.0;
+        if (!snapshot.exists || snapshot.data()?['balance'] == null) {
+          throw Exception(
+              'Balance document missing or invalid after initialization');
         }
 
+        final currentBalance = (snapshot.data()!['balance'] as num).toDouble();
+        debugPrint('Current Firestore balance: $currentBalance RITZ');
+
         if (currentBalance < total) {
-          return false; // Insufficient balance
+          debugPrint('Insufficient balance: $currentBalance < $total');
+          return;
         }
 
         final newBalance = currentBalance - total;
-        transaction.set(
-            balanceRef, {'balance': newBalance}, SetOptions(merge: true));
-        return true;
+        debugPrint('Deducting $total RITZ, new balance: $newBalance RITZ');
+
+        transaction.update(balanceRef, {'balance': newBalance});
+
+        final transactionRef =
+            FirebaseFirestore.instance.collection('transactions').doc();
+        transaction.set(transactionRef, {
+          'userId': user.uid,
+          'amount': total,
+          'type': 'purchase',
+          'items': {
+            'food': widget.foodCart,
+            'stationery': widget.stationeryCart,
+            'xerox': widget.file != null
+                ? {
+                    'copies': widget.copies,
+                    'isColor': widget.isColor,
+                    'side': widget.printSide,
+                  }
+                : null,
+          },
+          'isTakeaway': widget.isTakeaway,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+        debugPrint('Transaction logged with ID: ${transactionRef.id}');
+        success = true;
       });
+
+      if (success) {
+        // Verify Firestore update
+        final updatedSnapshot = await balanceRef.get();
+        if (!updatedSnapshot.exists ||
+            updatedSnapshot.data()?['balance'] == null) {
+          debugPrint('Error: Balance document invalid after update');
+          return false;
+        }
+        final updatedBalance =
+            (updatedSnapshot.data()!['balance'] as num).toDouble();
+        debugPrint('Verified Firestore balance: $updatedBalance RITZ');
+
+        // Clear carts only after Firestore confirmation
+        widget.foodCart.clear();
+        widget.stationeryCart.clear();
+        debugPrint('Cleared carts after Firestore update');
+        debugPrint('Food cart after payment: ${widget.foodCart}');
+        debugPrint('Stationery cart after payment: ${widget.stationeryCart}');
+
+        // Log purchase with PIN
+        if (widget.foodCart.isNotEmpty) {
+          final purchaseRef =
+              FirebaseFirestore.instance.collection('purchases').doc();
+          await purchaseRef.set({
+            'userId': user.uid,
+            'foodItems': widget.foodCart,
+            'total': total,
+            'isTakeaway': widget.isTakeaway,
+            'timestamp': FieldValue.serverTimestamp(),
+            'pin': (100 + (DateTime.now().millisecondsSinceEpoch % 900))
+                .toString(),
+          });
+          debugPrint('Purchase logged with PIN to purchases collection');
+        }
+
+        return true;
+      } else {
+        debugPrint('Transaction failed: Insufficient balance or error');
+        return false;
+      }
     } catch (e) {
-      print('Error processing payment: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error processing payment')),
-      );
+      debugPrint('Firestore error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to deduct balance: $e')),
+        );
+      }
       return false;
     }
   }
@@ -153,7 +239,6 @@ class _PaymentScreenState extends State<PaymentScreen>
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // Display xerox details
                   if (widget.file != null)
                     AnimatedOpacity(
                       opacity: 1.0,
@@ -204,7 +289,6 @@ class _PaymentScreenState extends State<PaymentScreen>
                         ),
                       ),
                     ),
-                  // Display stationery items
                   if (widget.stationeryCart.isNotEmpty)
                     AnimatedOpacity(
                       opacity: 1.0,
@@ -266,7 +350,6 @@ class _PaymentScreenState extends State<PaymentScreen>
                         ),
                       ),
                     ),
-                  // Display food items
                   if (widget.foodCart.isNotEmpty)
                     AnimatedOpacity(
                       opacity: 1.0,
@@ -328,7 +411,6 @@ class _PaymentScreenState extends State<PaymentScreen>
                         ),
                       ),
                     ),
-                  // Takeaway Option Display
                   if (widget.isTakeaway)
                     AnimatedOpacity(
                       opacity: 1.0,
@@ -369,7 +451,6 @@ class _PaymentScreenState extends State<PaymentScreen>
                         ),
                       ),
                     ),
-                  // Total and Balance
                   StreamBuilder<DocumentSnapshot>(
                     stream: user != null
                         ? FirebaseFirestore.instance
@@ -379,10 +460,20 @@ class _PaymentScreenState extends State<PaymentScreen>
                         : null,
                     builder: (context, snapshot) {
                       double balance = 0.0;
+                      if (snapshot.hasError) {
+                        debugPrint('Stream error: ${snapshot.error}');
+                      }
                       if (snapshot.hasData && snapshot.data!.exists) {
-                        balance =
-                            (snapshot.data!['balance'] as num?)?.toDouble() ??
-                                0.0;
+                        final data =
+                            snapshot.data!.data() as Map<String, dynamic>?;
+                        if (data != null && data['balance'] != null) {
+                          balance = (data['balance'] as num).toDouble();
+                          debugPrint('UI balance updated: $balance RITZ');
+                        } else {
+                          debugPrint('Balance field missing in document');
+                        }
+                      } else {
+                        debugPrint('Balance document not found or empty');
                       }
 
                       return Container(
@@ -448,7 +539,7 @@ class _PaymentScreenState extends State<PaymentScreen>
                       );
                     },
                   ),
-                  const SizedBox(height: 80), // Space for floating buttons
+                  const SizedBox(height: 80),
                 ],
               ),
             ),
@@ -456,18 +547,26 @@ class _PaymentScreenState extends State<PaymentScreen>
               bottom: 16.0,
               right: 16.0,
               child: GestureDetector(
+                onTapDown: (_) => _buttonController.forward(),
+                onTapUp: (_) => _buttonController.reverse(),
+                onTapCancel: () => _buttonController.reverse(),
                 onTap: () async {
+                  debugPrint('Pay button clicked');
                   final success = await _processPayment();
-                  if (success) {
+                  if (success && mounted) {
+                    debugPrint(
+                        'Payment successful, navigating to success screen');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
                           builder: (context) => const PaymentSuccessScreen()),
                     );
-                  } else {
+                  } else if (mounted) {
+                    debugPrint('Payment failed, showing snackbar');
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: const Text('Insufficient RITZ balance'),
+                        content: const Text(
+                            'Failed to deduct balance or insufficient funds'),
                         backgroundColor: Colors.redAccent,
                         action: SnackBarAction(
                           label: 'Buy RITZ',

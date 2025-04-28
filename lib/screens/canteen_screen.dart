@@ -17,6 +17,40 @@ class _CanteenScreenState extends State<CanteenScreen>
     with SingleTickerProviderStateMixin {
   String _searchQuery = '';
   final Map<String, int> _foodCart = {};
+  late AnimationController _buttonController;
+  late Animation<double> _buttonScaleAnimation;
+  bool _isTakeaway = false;
+  bool _isProcessingPayment = false;
+  bool _isLoadingFoodItems = true;
+  List<FoodItem> _foodItems = [];
+  final List<String> _categories = [
+    'Chinese',
+    'Beverages',
+    'Snacks',
+    'South Indian'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _buttonController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
+      CurvedAnimation(parent: _buttonController, curve: Curves.bounceOut),
+    );
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+    );
+    _fetchFoodItems();
+  }
+
+  @override
+  void dispose() {
+    _buttonController.dispose();
+    super.dispose();
+  }
 
   void _addToCart(String itemId) {
     final item = _foodItems.firstWhere((food) => food.id == itemId);
@@ -38,73 +72,6 @@ class _CanteenScreenState extends State<CanteenScreen>
     });
   }
 
-  late AnimationController _buttonController;
-  late Animation<double> _buttonScaleAnimation;
-  bool _isTakeaway = false;
-  double? userBalance;
-  bool isLoading = true;
-  bool _isProcessingPayment = false;
-  bool _isLoggingPurchase = false;
-  List<FoodItem> _foodItems = [];
-  bool _isLoadingFoodItems = true;
-
-  final List<String> _categories = [
-    'Chinese',
-    'Beverages',
-    'Snacks',
-    'South Indian',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _buttonController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 200));
-    _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
-        CurvedAnimation(parent: _buttonController, curve: Curves.bounceOut));
-    FirebaseFirestore.instance.settings = const Settings(
-      persistenceEnabled: true,
-    );
-    _fetchUserBalance();
-    _fetchFoodItems();
-  }
-
-  @override
-  void dispose() {
-    _buttonController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _fetchUserBalance() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        setState(() {
-          userBalance = 0.0;
-          isLoading = false;
-        });
-        return;
-      }
-      final doc = await FirebaseFirestore.instance
-          .collection('user_balances')
-          .doc(user.uid)
-          .get();
-      setState(() {
-        userBalance = (doc.data()?['balance'] as num?)?.toDouble() ?? 0.0;
-        isLoading = false;
-      });
-    } catch (e) {
-      print('Error fetching user balance: $e');
-      setState(() {
-        userBalance = 0.0;
-        isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading balance: $e')),
-      );
-    }
-  }
-
   Future<void> _fetchFoodItems() async {
     try {
       print('Fetching food items from Firestore...');
@@ -112,10 +79,8 @@ class _CanteenScreenState extends State<CanteenScreen>
           .collection('foods')
           .orderBy('createdAt', descending: true)
           .get();
-
       final items =
           querySnapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
-
       setState(() {
         _foodItems = items;
         _isLoadingFoodItems = false;
@@ -123,9 +88,7 @@ class _CanteenScreenState extends State<CanteenScreen>
       print('Successfully loaded ${items.length} food items');
     } catch (e) {
       print('Error fetching food items: $e');
-      setState(() {
-        _isLoadingFoodItems = false;
-      });
+      setState(() => _isLoadingFoodItems = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error loading food items: $e')),
       );
@@ -151,50 +114,7 @@ class _CanteenScreenState extends State<CanteenScreen>
     return total;
   }
 
-  Future<void> _logPurchase() async {
-    if (_foodCart.isEmpty) return;
-    setState(() => _isLoggingPurchase = true);
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in to log purchase')),
-        );
-        return;
-      }
-      final batch = FirebaseFirestore.instance.batch();
-      for (var entry in _foodCart.entries) {
-        final item = _foodItems.firstWhere((food) => food.id == entry.key);
-        final purchaseRef = FirebaseFirestore.instance
-            .collection('purchases')
-            .doc(); // New document for each purchase
-        batch.set(purchaseRef, {
-          'userId': user.uid,
-          'itemId': item.id,
-          'itemName': item.name,
-          'quantity': entry.value,
-          'totalCost': item.price * entry.value,
-          'isTakeaway': _isTakeaway,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
-        // Update stock
-        final foodRef =
-            FirebaseFirestore.instance.collection('foods').doc(item.id);
-        batch.update(foodRef, {'stock': item.stock - entry.value});
-      }
-      await batch.commit();
-      print('Purchase logged successfully');
-    } catch (e) {
-      print('Error logging purchase: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error logging purchase: $e')),
-      );
-    } finally {
-      setState(() => _isLoggingPurchase = false);
-    }
-  }
-
-  void _proceedToPayment() async {
+  Future<void> _proceedToPayment() async {
     if (_foodCart.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Your cart is empty')),
@@ -202,9 +122,21 @@ class _CanteenScreenState extends State<CanteenScreen>
       return;
     }
     setState(() => _isProcessingPayment = true);
+
     try {
-      await _logPurchase();
-      Navigator.push(
+      // Update stock before proceeding (but don't log purchase yet)
+      final batch = FirebaseFirestore.instance.batch();
+      for (var entry in _foodCart.entries) {
+        final item = _foodItems.firstWhere((food) => food.id == entry.key);
+        final foodRef =
+            FirebaseFirestore.instance.collection('foods').doc(item.id);
+        batch.update(foodRef, {'stock': item.stock - entry.value});
+      }
+      await batch.commit();
+      print('Stock updated successfully');
+
+      // Navigate to PaymentScreen and wait for result
+      final result = await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => PaymentScreen(
@@ -221,16 +153,42 @@ class _CanteenScreenState extends State<CanteenScreen>
           ),
         ),
       );
-      // Clear cart after navigating
-      setState(() {
-        _foodCart.clear();
-        _isTakeaway = false;
-      });
+
+      // Clear cart only if payment is successful
+      if (result == true) {
+        setState(() {
+          _foodCart.clear();
+          _isTakeaway = false;
+        });
+        print('Cart cleared after successful payment');
+      } else {
+        print('Payment failed, cart not cleared');
+        // Optionally revert stock if payment fails
+        final revertBatch = FirebaseFirestore.instance.batch();
+        for (var entry in _foodCart.entries) {
+          final item = _foodItems.firstWhere((food) => food.id == entry.key);
+          final foodRef =
+              FirebaseFirestore.instance.collection('foods').doc(item.id);
+          revertBatch.update(foodRef, {'stock': item.stock + entry.value});
+        }
+        await revertBatch.commit();
+        print('Stock reverted due to payment failure');
+      }
     } catch (e) {
       print('Error proceeding to payment: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error proceeding to payment: $e')),
       );
+      // Revert stock on error
+      final revertBatch = FirebaseFirestore.instance.batch();
+      for (var entry in _foodCart.entries) {
+        final item = _foodItems.firstWhere((food) => food.id == entry.key);
+        final foodRef =
+            FirebaseFirestore.instance.collection('foods').doc(item.id);
+        revertBatch.update(foodRef, {'stock': item.stock + entry.value});
+      }
+      await revertBatch.commit();
+      print('Stock reverted due to error');
     } finally {
       setState(() => _isProcessingPayment = false);
     }
@@ -243,7 +201,7 @@ class _CanteenScreenState extends State<CanteenScreen>
     return Scaffold(
       appBar: CustomNavigationDrawer.buildAppBar(context, 'Canteen'),
       drawer: const CustomNavigationDrawer(),
-      body: isLoading || _isLoadingFoodItems
+      body: _isLoadingFoodItems
           ? const Center(child: CircularProgressIndicator())
           : Container(
               decoration: const BoxDecoration(
@@ -267,16 +225,42 @@ class _CanteenScreenState extends State<CanteenScreen>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Text(
-                        'Balance: ${userBalance?.toStringAsFixed(2) ?? "0.00"} RITZ',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
+                    StreamBuilder<DocumentSnapshot>(
+                      stream: FirebaseAuth.instance.currentUser != null
+                          ? FirebaseFirestore.instance
+                              .collection('user_balances')
+                              .doc(FirebaseAuth.instance.currentUser!.uid)
+                              .snapshots()
+                          : null,
+                      builder: (context, snapshot) {
+                        double balance = 0.0;
+                        if (snapshot.hasError) {
+                          print('Stream error: ${snapshot.error}');
+                        }
+                        if (snapshot.hasData && snapshot.data!.exists) {
+                          final data =
+                              snapshot.data!.data() as Map<String, dynamic>?;
+                          if (data != null && data['balance'] != null) {
+                            balance = (data['balance'] as num).toDouble();
+                            print('UI balance updated: $balance RITZ');
+                          } else {
+                            print('Balance field missing in document');
+                          }
+                        } else {
+                          print('Balance document not found or empty');
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Text(
+                            'Balance: ${balance.toStringAsFixed(2)} RITZ',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 16),
                     Padding(
@@ -490,9 +474,12 @@ class _CanteenScreenState extends State<CanteenScreen>
                 ),
               ),
             ),
-      floatingActionButton: _isProcessingPayment || _isLoggingPurchase
+      floatingActionButton: _isProcessingPayment
           ? const CircularProgressIndicator()
           : GestureDetector(
+              onTapDown: (_) => _buttonController.forward(),
+              onTapUp: (_) => _buttonController.reverse(),
+              onTapCancel: () => _buttonController.reverse(),
               onTap: _proceedToPayment,
               child: AnimatedBuilder(
                 animation: _buttonScaleAnimation,
