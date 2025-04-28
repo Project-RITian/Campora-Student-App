@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -83,7 +84,7 @@ class _PaymentScreenState extends State<PaymentScreen>
     return total;
   }
 
-  Future<bool> _processPayment() async {
+ Future<bool> _processPayment() async {
     final user = fb_auth.FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
@@ -112,7 +113,6 @@ class _PaymentScreenState extends State<PaymentScreen>
         await balanceRef.set({'balance': 965.0}, SetOptions(merge: true));
         debugPrint(
             'Initialized/Updated balance to 965.0 RITZ for user: ${user.uid}');
-        // Force StreamBuilder to refresh
         await Future.delayed(Duration(milliseconds: 100));
       }
 
@@ -137,6 +137,33 @@ class _PaymentScreenState extends State<PaymentScreen>
 
         transaction.update(balanceRef, {'balance': newBalance});
 
+        // Generate 3-digit PIN (100-999)
+        final pin = 100 + Random().nextInt(900);
+        debugPrint('Generated PIN: $pin');
+
+        // Log to users/<uid>/purchases
+        final purchaseRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('purchases')
+            .doc();
+        transaction.set(purchaseRef, {
+          'isTakeaway': widget.isTakeaway,
+          'items': widget.foodCart.entries.map((entry) {
+            final item = widget.foodItems.firstWhere((i) => i.id == entry.key);
+            return {
+              'id': item.id,
+              'name': item.name,
+              'price': item.price,
+              'quantity': entry.value,
+            };
+          }).toList(),
+          'pin': pin.toString(),
+          'timestamp': FieldValue.serverTimestamp(),
+          'totalCost': total,
+          'type': 'canteen',
+        });
+
         final transactionRef =
             FirebaseFirestore.instance.collection('transactions').doc();
         transaction.set(transactionRef, {
@@ -158,12 +185,11 @@ class _PaymentScreenState extends State<PaymentScreen>
           'timestamp': FieldValue.serverTimestamp(),
         });
 
-        debugPrint('Transaction logged with ID: ${transactionRef.id}');
+        debugPrint('Transaction and purchase logged with PIN: $pin');
         success = true;
       });
 
       if (success) {
-        // Verify Firestore update
         final updatedSnapshot = await balanceRef.get();
         if (!updatedSnapshot.exists ||
             updatedSnapshot.data()?['balance'] == null) {
@@ -174,28 +200,11 @@ class _PaymentScreenState extends State<PaymentScreen>
             (updatedSnapshot.data()!['balance'] as num).toDouble();
         debugPrint('Verified Firestore balance: $updatedBalance RITZ');
 
-        // Clear carts only after Firestore confirmation
         widget.foodCart.clear();
         widget.stationeryCart.clear();
         debugPrint('Cleared carts after Firestore update');
         debugPrint('Food cart after payment: ${widget.foodCart}');
         debugPrint('Stationery cart after payment: ${widget.stationeryCart}');
-
-        // Log purchase with PIN
-        if (widget.foodCart.isNotEmpty) {
-          final purchaseRef =
-              FirebaseFirestore.instance.collection('purchases').doc();
-          await purchaseRef.set({
-            'userId': user.uid,
-            'foodItems': widget.foodCart,
-            'total': total,
-            'isTakeaway': widget.isTakeaway,
-            'timestamp': FieldValue.serverTimestamp(),
-            'pin': (100 + (DateTime.now().millisecondsSinceEpoch % 900))
-                .toString(),
-          });
-          debugPrint('Purchase logged with PIN to purchases collection');
-        }
 
         return true;
       } else {

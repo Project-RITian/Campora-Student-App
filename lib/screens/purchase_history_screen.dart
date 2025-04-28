@@ -69,8 +69,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     (purchase['timestamp'] as Timestamp?)?.toDate();
                 final isTakeaway = purchase['isTakeaway'] ?? false;
                 final items = (purchase['items'] as List<dynamic>?) ?? [];
-                final xeroxDetails =
-                    purchase['xeroxDetails'] as Map<String, dynamic>?;
 
                 return GestureDetector(
                   onTap: () {
@@ -111,18 +109,10 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                               'Items: ${items.map((item) => "${item['name']} x${item['quantity']}").join(", ")}',
                             ),
                           ],
-                          if (type == 'arcade' && xeroxDetails != null) ...[
-                            Text('File: ${xeroxDetails['fileName'] ?? "N/A"}'),
-                            Text('Copies: ${xeroxDetails['copies'] ?? 0}'),
-                          ],
-                          if (items.isNotEmpty && type == 'arcade')
-                            Text(
-                              'Stationery: ${items.map((item) => "${item['name']} x${item['quantity']}").join(", ")}',
-                            ),
                           const SizedBox(height: 8),
                           if (timestamp != null)
                             Text(
-                              'Date: ${timestamp.toString()}',
+                              'Date: ${timestamp.toLocal().toString().split('.')[0]}',
                               style: const TextStyle(color: Colors.grey),
                             ),
                         ],
