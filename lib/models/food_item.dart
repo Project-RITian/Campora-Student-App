@@ -1,12 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FoodItem {
-  final String id; // Changed from int to String
+  final String id;
   final String name;
   final double price;
   final String category;
   final int stock;
   final String imageUrl;
+  final bool isInStock; // Added isInStock field
 
   FoodItem({
     required this.id,
@@ -15,6 +16,7 @@ class FoodItem {
     required this.category,
     required this.stock,
     required this.imageUrl,
+    required this.isInStock,
   });
 
   // Helper method to convert to map
@@ -26,6 +28,7 @@ class FoodItem {
       'category': category,
       'stock': stock,
       'imageUrl': imageUrl,
+      'isInStock': isInStock, // Include isInStock in map
     };
   }
 
@@ -33,12 +36,14 @@ class FoodItem {
   factory FoodItem.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return FoodItem(
-      id: doc.id, // Using document ID as the item ID
-      name: data['name'] ?? 'No Name',
+      id: doc.id,
+      name: data['name']?.toString() ?? 'No Name',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      category: data['category'] ?? 'Uncategorized',
-      stock: data['stock'] ?? 100, // Use actual stock if available
-      imageUrl: data['imageUrl'] ?? '',
+      category: data['category']?.toString() ?? 'Uncategorized',
+      stock: (data['stock'] as num?)?.toInt() ?? 100,
+      imageUrl: data['imageUrl']?.toString() ?? '',
+      isInStock:
+          data['isInStock'] as bool? ?? true, // Default to true if missing
     );
   }
 }

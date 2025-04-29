@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'dart:math';
 import '../models/food_item.dart';
 import '../widgets/custom_navigation_drawer.dart';
 import 'payment_screen.dart';
@@ -21,7 +20,6 @@ class _CanteenScreenState extends State<CanteenScreen>
   late Animation<double> _buttonScaleAnimation;
   bool _isTakeaway = false;
   bool _isProcessingPayment = false;
-  bool _isLoadingFoodItems = true;
   List<FoodItem> _foodItems = [];
   final List<String> _categories = [
     'Chinese',
@@ -43,7 +41,6 @@ class _CanteenScreenState extends State<CanteenScreen>
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
     );
-    _fetchFoodItems();
   }
 
   @override
@@ -54,6 +51,12 @@ class _CanteenScreenState extends State<CanteenScreen>
 
   void _addToCart(String itemId) {
     final item = _foodItems.firstWhere((food) => food.id == itemId);
+    if (!item.isInStock) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${item.name} is out of stock')),
+      );
+      return;
+    }
     if (item.stock <= (_foodCart[itemId] ?? 0)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${item.name} is out of stock')),
@@ -72,35 +75,12 @@ class _CanteenScreenState extends State<CanteenScreen>
     });
   }
 
-  Future<void> _fetchFoodItems() async {
-    try {
-      print('Fetching food items from Firestore...');
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('foods')
-          .orderBy('createdAt', descending: true)
-          .get();
-      final items =
-          querySnapshot.docs.map((doc) => FoodItem.fromFirestore(doc)).toList();
-      setState(() {
-        _foodItems = items;
-        _isLoadingFoodItems = false;
-      });
-      print('Successfully loaded ${items.length} food items');
-    } catch (e) {
-      print('Error fetching food items: $e');
-      setState(() => _isLoadingFoodItems = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading food items: $e')),
-      );
-    }
-  }
-
   List<FoodItem> _getFilteredItems(String category) {
     return _foodItems.where((item) {
       final matchesCategory = item.category == category;
       final matchesSearch =
           item.name.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch && item.stock > 0;
+      return matchesCategory && matchesSearch;
     }).toList();
   }
 
@@ -124,7 +104,6 @@ class _CanteenScreenState extends State<CanteenScreen>
     setState(() => _isProcessingPayment = true);
 
     try {
-      // Update stock before proceeding (but don't log purchase yet)
       final batch = FirebaseFirestore.instance.batch();
       for (var entry in _foodCart.entries) {
         final item = _foodItems.firstWhere((food) => food.id == entry.key);
@@ -135,7 +114,6 @@ class _CanteenScreenState extends State<CanteenScreen>
       await batch.commit();
       print('Stock updated successfully');
 
-      // Navigate to PaymentScreen and wait for result
       final result = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -145,8 +123,8 @@ class _CanteenScreenState extends State<CanteenScreen>
             isColor: false,
             printSide: '',
             customInstructions: '',
-            stationeryCart: {}, // Empty stationery cart
-            stationeryItems: [], // Empty stationery items
+            stationeryCart: {},
+            stationeryItems: [],
             foodCart: Map.from(_foodCart),
             foodItems: _foodItems,
             isTakeaway: _isTakeaway,
@@ -154,7 +132,6 @@ class _CanteenScreenState extends State<CanteenScreen>
         ),
       );
 
-      // Clear cart only if payment is successful
       if (result == true) {
         setState(() {
           _foodCart.clear();
@@ -163,7 +140,6 @@ class _CanteenScreenState extends State<CanteenScreen>
         print('Cart cleared after successful payment');
       } else {
         print('Payment failed, cart not cleared');
-        // Optionally revert stock if payment fails
         final revertBatch = FirebaseFirestore.instance.batch();
         for (var entry in _foodCart.entries) {
           final item = _foodItems.firstWhere((food) => food.id == entry.key);
@@ -179,7 +155,6 @@ class _CanteenScreenState extends State<CanteenScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error proceeding to payment: $e')),
       );
-      // Revert stock on error
       final revertBatch = FirebaseFirestore.instance.batch();
       for (var entry in _foodCart.entries) {
         final item = _foodItems.firstWhere((food) => food.id == entry.key);
@@ -201,279 +176,324 @@ class _CanteenScreenState extends State<CanteenScreen>
     return Scaffold(
       appBar: CustomNavigationDrawer.buildAppBar(context, 'Canteen'),
       drawer: const CustomNavigationDrawer(),
-      body: _isLoadingFoodItems
-          ? const Center(child: CircularProgressIndicator())
-          : Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF0C4D83), Color(0xFF64B5F6)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance
+            .collection('foods')
+            .orderBy('createdAt', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            print('Error fetching food items: ${snapshot.error}');
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            print('No food items found');
+            return const Center(child: Text('No food items available'));
+          }
+
+          _foodItems = snapshot.data!.docs
+              .map((doc) => FoodItem.fromFirestore(doc))
+              .toList();
+
+          return Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF0C4D83), Color(0xFF64B5F6)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Canteen Menu',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Canteen Menu',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  StreamBuilder<DocumentSnapshot>(
+                    stream: FirebaseAuth.instance.currentUser != null
+                        ? FirebaseFirestore.instance
+                            .collection('user_balances')
+                            .doc(FirebaseAuth.instance.currentUser!.uid)
+                            .snapshots()
+                        : null,
+                    builder: (context, snapshot) {
+                      double balance = 0.0;
+                      if (snapshot.hasError) {
+                        print('Stream error: ${snapshot.error}');
+                      }
+                      if (snapshot.hasData && snapshot.data!.exists) {
+                        final data =
+                            snapshot.data!.data() as Map<String, dynamic>?;
+                        if (data != null && data['balance'] != null) {
+                          balance = (data['balance'] as num).toDouble();
+                          print('UI balance updated: $balance RITZ');
+                        } else {
+                          print('Balance field missing in document');
+                        }
+                      } else {
+                        print('Balance document not found or empty');
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Text(
+                          'Balance: ${balance.toStringAsFixed(2)} RITZ',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Text(
+                      'Total: ${_calculateTotalCost().toStringAsFixed(2)} RITZ',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    StreamBuilder<DocumentSnapshot>(
-                      stream: FirebaseAuth.instance.currentUser != null
-                          ? FirebaseFirestore.instance
-                              .collection('user_balances')
-                              .doc(FirebaseAuth.instance.currentUser!.uid)
-                              .snapshots()
-                          : null,
-                      builder: (context, snapshot) {
-                        double balance = 0.0;
-                        if (snapshot.hasError) {
-                          print('Stream error: ${snapshot.error}');
-                        }
-                        if (snapshot.hasData && snapshot.data!.exists) {
-                          final data =
-                              snapshot.data!.data() as Map<String, dynamic>?;
-                          if (data != null && data['balance'] != null) {
-                            balance = (data['balance'] as num).toDouble();
-                            print('UI balance updated: $balance RITZ');
-                          } else {
-                            print('Balance field missing in document');
-                          }
-                        } else {
-                          print('Balance document not found or empty');
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                          child: Text(
-                            'Balance: ${balance.toStringAsFixed(2)} RITZ',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Text(
-                        'Total: ${_calculateTotalCost().toStringAsFixed(2)} RITZ',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search for food or drinks...',
+                        hintStyle: const TextStyle(color: Colors.grey),
+                        prefixIcon:
+                            const Icon(Icons.search, color: Colors.white),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.2),
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12.0, horizontal: 20.0),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30.0),
+                            borderSide: BorderSide.none),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: TextField(
-                        decoration: InputDecoration(
-                          hintText: 'Search for food or drinks...',
-                          hintStyle: const TextStyle(color: Colors.grey),
-                          prefixIcon:
-                              const Icon(Icons.search, color: Colors.white),
-                          filled: true,
-                          fillColor: Colors.white.withOpacity(0.2),
-                          contentPadding: const EdgeInsets.symmetric(
-                              vertical: 12.0, horizontal: 20.0),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(30.0),
-                              borderSide: BorderSide.none),
-                        ),
-                        style: const TextStyle(color: Colors.white),
-                        onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value;
-                          });
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _foodItems.isEmpty
-                        ? const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(20.0),
-                              child: Text(
-                                'No food items available',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                ),
-                              ),
-                            ),
-                          )
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _categories.length,
-                            itemBuilder: (context, catIndex) {
-                              final category = _categories[catIndex];
-                              final filteredItems = _getFilteredItems(category);
-                              if (filteredItems.isEmpty)
-                                return const SizedBox.shrink();
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    category,
-                                    style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  ...filteredItems.map((item) {
-                                    final quantity = _foodCart[item.id] ?? 0;
-                                    return AnimatedOpacity(
-                                      opacity: 1.0,
-                                      duration:
-                                          const Duration(milliseconds: 500),
-                                      child: Container(
-                                        margin: const EdgeInsets.symmetric(
-                                            vertical: 8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.95),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color:
-                                                  Colors.black.withOpacity(0.1),
-                                              blurRadius: 10,
-                                              offset: const Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        child: ListTile(
-                                          contentPadding:
-                                              const EdgeInsets.all(12),
-                                          leading: ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                            child: Image.network(
-                                              item.imageUrl,
-                                              width: 70,
-                                              height: 70,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (context, error,
-                                                      stackTrace) =>
-                                                  const Icon(Icons.fastfood),
-                                            ),
-                                          ),
-                                          title: Text(
-                                            item.name,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.black87),
-                                          ),
-                                          subtitle: Text(
-                                            '${item.price} RITZ',
-                                            style: TextStyle(
-                                                color: Colors.teal[300]),
-                                          ),
-                                          trailing: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              GestureDetector(
-                                                onTap: () =>
-                                                    _removeFromCart(item.id),
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.all(6.0),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.grey[200],
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: const Icon(
-                                                    Icons.remove,
-                                                    size: 16,
-                                                    color: Colors.black54,
-                                                  ),
-                                                ),
-                                              ),
-                                              Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 8.0),
-                                                child: Text(
-                                                  quantity.toString(),
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Color(0xFF0C4D83),
-                                                  ),
-                                                ),
-                                              ),
-                                              GestureDetector(
-                                                onTap: () =>
-                                                    _addToCart(item.id),
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.all(6.0),
-                                                  decoration:
-                                                      const BoxDecoration(
-                                                    gradient: LinearGradient(
-                                                      colors: [
-                                                        Color(0xFF0C4D83),
-                                                        Color(0xFF64B5F6)
-                                                      ],
-                                                      begin: Alignment.topLeft,
-                                                      end:
-                                                          Alignment.bottomRight,
-                                                    ),
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: const Icon(
-                                                    Icons.add,
-                                                    size: 16,
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ],
-                              );
-                            },
-                          ),
-                    const SizedBox(height: 16),
-                    SwitchListTile(
-                      title: const Text(
-                        'Takeaway (+3 RITZ)',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                      value: _isTakeaway,
-                      activeColor: Colors.teal,
+                      style: const TextStyle(color: Colors.white),
                       onChanged: (value) {
                         setState(() {
-                          _isTakeaway = value;
+                          _searchQuery = value;
                         });
                       },
                     ),
-                    const SizedBox(height: 70),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 16),
+                  _foodItems.isEmpty
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20.0),
+                            child: Text(
+                              'No food items available',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _categories.length,
+                          itemBuilder: (context, catIndex) {
+                            final category = _categories[catIndex];
+                            final filteredItems = _getFilteredItems(category);
+                            if (filteredItems.isEmpty)
+                              return const SizedBox.shrink();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  category,
+                                  style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white),
+                                ),
+                                const SizedBox(height: 8),
+                                ...filteredItems.map((item) {
+                                  final quantity = _foodCart[item.id] ?? 0;
+                                  return AnimatedOpacity(
+                                    opacity: item.isInStock ? 1.0 : 0.5,
+                                    duration: const Duration(milliseconds: 500),
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(
+                                          vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(
+                                            item.isInStock ? 0.95 : 0.7),
+                                        borderRadius: BorderRadius.circular(16),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                Colors.black.withOpacity(0.1),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.all(12),
+                                        leading: ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          child: Image.network(
+                                            item.imageUrl,
+                                            width: 70,
+                                            height: 70,
+                                            fit: BoxFit.cover,
+                                            errorBuilder:
+                                                (context, error, stackTrace) =>
+                                                    const Icon(Icons.fastfood),
+                                          ),
+                                        ),
+                                        title: Text(
+                                          item.name,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            color: item.isInStock
+                                                ? Colors.black87
+                                                : Colors.grey,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          item.isInStock
+                                              ? '${item.price} RITZ'
+                                              : 'Out of Stock',
+                                          style: TextStyle(
+                                            color: item.isInStock
+                                                ? Colors.teal[300]
+                                                : Colors.grey,
+                                          ),
+                                        ),
+                                        trailing: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            GestureDetector(
+                                              onTap: item.isInStock
+                                                  ? () =>
+                                                      _removeFromCart(item.id)
+                                                  : null,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.all(6.0),
+                                                decoration: BoxDecoration(
+                                                  color: item.isInStock
+                                                      ? Colors.grey[200]
+                                                      : Colors.grey[400],
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: Icon(
+                                                  Icons.remove,
+                                                  size: 16,
+                                                  color: item.isInStock
+                                                      ? Colors.black54
+                                                      : Colors.grey,
+                                                ),
+                                              ),
+                                            ),
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8.0),
+                                              child: Text(
+                                                quantity.toString(),
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: item.isInStock
+                                                      ? const Color(0xFF0C4D83)
+                                                      : Colors.grey,
+                                                ),
+                                              ),
+                                            ),
+                                            GestureDetector(
+                                              onTap: item.isInStock
+                                                  ? () => _addToCart(item.id)
+                                                  : null,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.all(6.0),
+                                                decoration: BoxDecoration(
+                                                  gradient: LinearGradient(
+                                                    colors: item.isInStock
+                                                        ? [
+                                                            const Color(
+                                                                0xFF0C4D83),
+                                                            const Color(
+                                                                0xFF64B5F6)
+                                                          ]
+                                                        : [
+                                                            Colors.grey,
+                                                            Colors.grey
+                                                          ],
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                  ),
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: Icon(
+                                                  Icons.add,
+                                                  size: 16,
+                                                  color: item.isInStock
+                                                      ? Colors.white
+                                                      : Colors.grey[300],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ],
+                            );
+                          },
+                        ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: const Text(
+                      'Takeaway (+3 RITZ)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                    value: _isTakeaway,
+                    activeColor: Colors.teal,
+                    onChanged: (value) {
+                      setState(() {
+                        _isTakeaway = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 70),
+                ],
               ),
             ),
+          );
+        },
+      ),
       floatingActionButton: _isProcessingPayment
           ? const CircularProgressIndicator()
           : GestureDetector(
