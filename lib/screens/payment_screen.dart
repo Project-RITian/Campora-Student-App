@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/stationery_item.dart';
-import '../models/food_item.dart';
+import '../models/food_item.dart'; // Ensure this import matches your file path
 import '../widgets/custom_navigation_drawer.dart';
 import 'payment_success_screen.dart';
 import 'ritz_purchase_screen.dart';
 
 class PaymentScreen extends StatefulWidget {
   final File? file;
+  final String? fileUrl;
   final int copies;
   final bool isColor;
   final String printSide;
@@ -24,6 +25,7 @@ class PaymentScreen extends StatefulWidget {
   const PaymentScreen({
     super.key,
     this.file,
+    this.fileUrl,
     required this.copies,
     required this.isColor,
     required this.printSide,
@@ -54,6 +56,13 @@ class _PaymentScreenState extends State<PaymentScreen>
     _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
       CurvedAnimation(parent: _buttonController, curve: Curves.bounceOut),
     );
+    debugPrint(
+        'PaymentScreen initialized with stationeryCart: ${widget.stationeryCart}');
+    debugPrint('Stationery items passed: ${widget.stationeryItems.map((i) => {
+          'id': i.id,
+          'name': i.name,
+          'price': i.price
+        }).toList()}');
   }
 
   @override
@@ -71,11 +80,26 @@ class _PaymentScreenState extends State<PaymentScreen>
       }
     }
     widget.stationeryCart.forEach((id, qty) {
-      final item = widget.stationeryItems.firstWhere((item) => item.id == id);
+      final item = widget.stationeryItems.firstWhere(
+        (item) => item.id == id,
+        orElse: () => StationeryItem(
+            id: id, name: 'Unknown', price: 0, stock: 0, imageUrl: ''),
+      );
       total += item.price * qty;
     });
     widget.foodCart.forEach((id, qty) {
-      final item = widget.foodItems.firstWhere((item) => item.id == id);
+      final item = widget.foodItems.firstWhere(
+        (item) => item.id == id,
+        orElse: () => FoodItem(
+          id: id,
+          name: 'Unknown',
+          price: 0.0, // Match double type
+          category: 'Uncategorized',
+          stock: 0, // Match int type
+          imageUrl: '',
+          isInStock: false,
+        ),
+      );
       total += item.price * qty;
     });
     if (widget.isTakeaway) {
@@ -84,7 +108,7 @@ class _PaymentScreenState extends State<PaymentScreen>
     return total;
   }
 
- Future<bool> _processPayment() async {
+  Future<bool> _processPayment() async {
     final user = fb_auth.FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
@@ -113,7 +137,7 @@ class _PaymentScreenState extends State<PaymentScreen>
         await balanceRef.set({'balance': 965.0}, SetOptions(merge: true));
         debugPrint(
             'Initialized/Updated balance to 965.0 RITZ for user: ${user.uid}');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 100));
       }
 
       bool success = false;
@@ -124,7 +148,9 @@ class _PaymentScreenState extends State<PaymentScreen>
               'Balance document missing or invalid after initialization');
         }
 
-        final currentBalance = (snapshot.data()!['balance'] as num).toDouble();
+        final currentBalance = snapshot.data()!['balance'] is num
+            ? (snapshot.data()!['balance'] as num).toDouble()
+            : 0.0;
         debugPrint('Current Firestore balance: $currentBalance RITZ');
 
         if (currentBalance < total) {
@@ -137,11 +163,81 @@ class _PaymentScreenState extends State<PaymentScreen>
 
         transaction.update(balanceRef, {'balance': newBalance});
 
-        // Generate 3-digit PIN (100-999)
-        final pin = 100 + Random().nextInt(900);
+        // Generate 3-digit PIN as String
+        final pin = await _generateUniquePin(user.uid);
         debugPrint('Generated PIN: $pin');
 
-        // Log to users/<uid>/purchases
+        // Convert stationeryCart keys from int to String for Firestore
+        final Map<String, int> firestoreStationeryCart = widget.stationeryCart
+            .map((key, value) => MapEntry(key.toString(), value));
+
+        // Prepare items list for purchases
+        List<Map<String, dynamic>> purchaseItems = [];
+
+        // Add food items (for canteen purchases)
+        if (widget.foodCart.isNotEmpty) {
+          debugPrint('Food cart: ${widget.foodCart}');
+          purchaseItems.addAll(widget.foodCart.entries.map((entry) {
+            final item = widget.foodItems.firstWhere(
+              (i) => i.id == entry.key,
+              orElse: () => FoodItem(
+                id: entry.key,
+                name: 'Unknown',
+                price: 0.0,
+                category: 'Uncategorized',
+                stock: 0,
+                imageUrl: '',
+                isInStock: false,
+              ),
+            );
+            final itemData = {
+              'id': item.id,
+              'name': item.name,
+              'price': item.price,
+              'quantity': entry.value,
+              'type': 'food',
+            };
+            debugPrint('Adding food item: $itemData');
+            return itemData;
+          }).toList());
+        } else {
+          debugPrint('No food items in cart to log');
+        }
+
+        // Add stationery items (for arcade purchases)
+        if (widget.stationeryCart.isNotEmpty) {
+          debugPrint('Stationery cart: ${widget.stationeryCart}');
+          purchaseItems.addAll(widget.stationeryCart.entries.map((entry) {
+            final item = widget.stationeryItems.firstWhere(
+              (i) => i.id == entry.key,
+              orElse: () => StationeryItem(
+                  id: entry.key,
+                  name: 'Unknown',
+                  price: 0,
+                  stock: 0,
+                  imageUrl: ''),
+            );
+            final itemData = {
+              'id': entry.key.toString(),
+              'name': item.name,
+              'price': item.price,
+              'quantity': entry.value,
+              'type': 'stationery',
+            };
+            debugPrint('Adding stationery item: $itemData');
+            return itemData;
+          }).toList());
+        } else {
+          debugPrint('No stationery items in cart to log');
+        }
+
+        debugPrint('Final purchase items list: $purchaseItems');
+
+        // Determine purchase type based on cart contents
+        final purchaseType = widget.foodCart.isNotEmpty ? 'canteen' : 'arcade';
+        debugPrint('Purchase type: $purchaseType');
+
+        // Log to users/<uid>/purchases with consistent structure
         final purchaseRef = FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
@@ -149,19 +245,21 @@ class _PaymentScreenState extends State<PaymentScreen>
             .doc();
         transaction.set(purchaseRef, {
           'isTakeaway': widget.isTakeaway,
-          'items': widget.foodCart.entries.map((entry) {
-            final item = widget.foodItems.firstWhere((i) => i.id == entry.key);
-            return {
-              'id': item.id,
-              'name': item.name,
-              'price': item.price,
-              'quantity': entry.value,
-            };
-          }).toList(),
-          'pin': pin.toString(),
+          'items': purchaseItems,
+          'xeroxDetails': widget.file != null
+              ? {
+                  'fileName': widget.file!.path.split('/').last,
+                  'fileUrl': widget.fileUrl,
+                  'copies': widget.copies,
+                  'printType': widget.isColor ? 'Color' : 'B/W',
+                  'printSide': widget.printSide,
+                  'customInstructions': widget.customInstructions,
+                }
+              : null,
+          'pin': pin,
           'timestamp': FieldValue.serverTimestamp(),
           'totalCost': total,
-          'type': 'canteen',
+          'type': purchaseType,
         });
 
         final transactionRef =
@@ -172,7 +270,7 @@ class _PaymentScreenState extends State<PaymentScreen>
           'type': 'purchase',
           'items': {
             'food': widget.foodCart,
-            'stationery': widget.stationeryCart,
+            'stationery': firestoreStationeryCart,
             'xerox': widget.file != null
                 ? {
                     'copies': widget.copies,
@@ -185,7 +283,8 @@ class _PaymentScreenState extends State<PaymentScreen>
           'timestamp': FieldValue.serverTimestamp(),
         });
 
-        debugPrint('Transaction and purchase logged with PIN: $pin');
+        debugPrint(
+            'Transaction and purchase logged with PIN: $pin, items: $purchaseItems');
         success = true;
       });
 
@@ -196,8 +295,9 @@ class _PaymentScreenState extends State<PaymentScreen>
           debugPrint('Error: Balance document invalid after update');
           return false;
         }
-        final updatedBalance =
-            (updatedSnapshot.data()!['balance'] as num).toDouble();
+        final updatedBalance = updatedSnapshot.data()!['balance'] is num
+            ? (updatedSnapshot.data()!['balance'] as num).toDouble()
+            : 0.0;
         debugPrint('Verified Firestore balance: $updatedBalance RITZ');
 
         widget.foodCart.clear();
@@ -220,6 +320,28 @@ class _PaymentScreenState extends State<PaymentScreen>
       }
       return false;
     }
+  }
+
+  Future<String> _generateUniquePin(String userId) async {
+    final random = Random();
+    final purchasesRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('purchases');
+    List<String> existingPins = [];
+
+    final querySnapshot = await purchasesRef.get();
+    existingPins = querySnapshot.docs.map((doc) {
+      var pin = doc['pin'];
+      return pin.toString();
+    }).toList();
+
+    String newPin;
+    do {
+      newPin = (100 + random.nextInt(900)).toString();
+    } while (existingPins.contains(newPin));
+
+    return newPin;
   }
 
   @override
@@ -329,8 +451,15 @@ class _PaymentScreenState extends State<PaymentScreen>
                             ),
                             const SizedBox(height: 8),
                             ...widget.stationeryCart.entries.map((entry) {
-                              final item = widget.stationeryItems
-                                  .firstWhere((i) => i.id == entry.key);
+                              final item = widget.stationeryItems.firstWhere(
+                                (i) => i.id == entry.key,
+                                orElse: () => StationeryItem(
+                                    id: entry.key,
+                                    name: 'Unknown',
+                                    price: 0,
+                                    stock: 0,
+                                    imageUrl: ''),
+                              );
                               return Padding(
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 4.0),
@@ -390,8 +519,18 @@ class _PaymentScreenState extends State<PaymentScreen>
                             ),
                             const SizedBox(height: 8),
                             ...widget.foodCart.entries.map((entry) {
-                              final item = widget.foodItems
-                                  .firstWhere((i) => i.id == entry.key);
+                              final item = widget.foodItems.firstWhere(
+                                (i) => i.id == entry.key,
+                                orElse: () => FoodItem(
+                                  id: entry.key,
+                                  name: 'Unknown',
+                                  price: 0.0,
+                                  category: 'Uncategorized',
+                                  stock: 0,
+                                  imageUrl: '',
+                                  isInStock: false,
+                                ),
+                              );
                               return Padding(
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 4.0),
@@ -405,7 +544,7 @@ class _PaymentScreenState extends State<PaymentScreen>
                                           fontSize: 16, color: Colors.black87),
                                     ),
                                     Text(
-                                      '${item.price * entry.value} RITZ',
+                                      '${(item.price * entry.value).toStringAsFixed(2)} RITZ',
                                       style: TextStyle(
                                         fontSize: 16,
                                         color: Colors.teal[300],
@@ -476,7 +615,9 @@ class _PaymentScreenState extends State<PaymentScreen>
                         final data =
                             snapshot.data!.data() as Map<String, dynamic>?;
                         if (data != null && data['balance'] != null) {
-                          balance = (data['balance'] as num).toDouble();
+                          balance = data['balance'] is num
+                              ? (data['balance'] as num).toDouble()
+                              : 0.0;
                           debugPrint('UI balance updated: $balance RITZ');
                         } else {
                           debugPrint('Balance field missing in document');

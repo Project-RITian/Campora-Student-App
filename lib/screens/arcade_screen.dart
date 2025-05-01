@@ -7,7 +7,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:ritian_v1/widgets/custom_navigation_drawer.dart';
 import '../models/stationery_item.dart';
 import 'payment_screen.dart';
-import 'dart:math';
 
 class ArcadeScreen extends StatefulWidget {
   const ArcadeScreen({super.key});
@@ -26,37 +25,12 @@ class _ArcadeScreenState extends State<ArcadeScreen>
   String _customInstructions = '';
   bool _isUploading = false;
   bool _isProcessingPayment = false;
+  bool _isLoadingItems = true;
   final FocusNode _instructionsFocusNode = FocusNode();
-  final List<StationeryItem> _stationeryItems = [
-    StationeryItem(
-      id: 1,
-      name: "Notebook",
-      price: 50,
-      stock: 100,
-      imageUrl: "https://via.placeholder.com/100x100.png?text=Notebook",
-    ),
-    StationeryItem(
-      id: 2,
-      name: "Pen",
-      price: 10,
-      stock: 200,
-      imageUrl: "https://via.placeholder.com/100x100.png?text=Pen",
-    ),
-    StationeryItem(
-      id: 3,
-      name: "Pencil",
-      price: 5,
-      stock: 150,
-      imageUrl: "https://via.placeholder.com/100x100.png?text=Pencil",
-    ),
-    StationeryItem(
-      id: 4,
-      name: "Eraser",
-      price: 3,
-      stock: 300,
-      imageUrl: "https://via.placeholder.com/100x100.png?text=Eraser",
-    ),
-  ];
+  final TextEditingController _searchController = TextEditingController();
+
+  List<StationeryItem> _stationeryItems = [];
+  List<StationeryItem> _filteredStationeryItems = [];
   final Map<int, int> _stationeryCart = {};
 
   late AnimationController _buttonController;
@@ -72,90 +46,102 @@ class _ArcadeScreenState extends State<ArcadeScreen>
     _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
       CurvedAnimation(parent: _buttonController, curve: Curves.bounceOut),
     );
-    // Test Firebase connectivity
+
     FirebaseFirestore.instance
         .collection('test')
         .doc('ping')
         .set({'timestamp': FieldValue.serverTimestamp()}).catchError((e) {
       print('Firebase test error: $e');
     });
+
+    _fetchStationeryItems();
+
+// Listen to search input changes
+    _searchController.addListener(_filterStationeryItems);
+  }
+
+  Future<void> _fetchStationeryItems() async {
+    try {
+      setState(() {
+        _isLoadingItems = true;
+      });
+
+      QuerySnapshot snapshot = await FirebaseFirestore.instance
+          .collection('stationery_products')
+          .get();
+
+      List<StationeryItem> items = snapshot.docs.asMap().entries.map((entry) {
+        int index = entry.key;
+        var doc = entry.value.data() as Map<String, dynamic>;
+
+        int price;
+        if (doc['price'] is num) {
+          price = (doc['price'] as num).toInt();
+        } else if (doc['price'] is String) {
+          price = int.tryParse(doc['price'] as String) ?? 0;
+        } else {
+          price = 0;
+        }
+
+        String name = doc['name'] is String ? doc['name'] : 'Unknown Item';
+        String imageUrl = doc['imageUrl'] is String
+            ? doc['imageUrl']
+            : "https://via.placeholder.com/100x100.png?text=Item";
+        int stock = doc['isInStock'] == true ? 100 : 0;
+
+        return StationeryItem(
+          id: index + 1,
+          name: name,
+          price: price,
+          stock: stock,
+          imageUrl: imageUrl,
+        );
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _stationeryItems = items;
+          _filteredStationeryItems = items; // Initialize filtered list
+          _isLoadingItems = false;
+        });
+        debugPrint('Fetched stationery items: ${_stationeryItems.map((i) => {
+              'id': i.id,
+              'name': i.name,
+              'price': i.price
+            }).toList()}');
+      }
+    } catch (e) {
+      print('Error fetching stationery items: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingItems = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error fetching items: $e')),
+        );
+      }
+    }
+  }
+
+  void _filterStationeryItems() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredStationeryItems = _stationeryItems;
+      } else {
+        _filteredStationeryItems = _stationeryItems
+            .where((item) => item.name.toLowerCase().contains(query))
+            .toList();
+      }
+    });
   }
 
   @override
   void dispose() {
     _instructionsFocusNode.dispose();
+    _searchController.dispose();
     _buttonController.dispose();
     super.dispose();
-  }
-
-  Future<String> _generateUniquePin(String userId) async {
-    final random = Random();
-    final purchasesRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('purchases');
-    List<String> existingPins = [];
-
-    final querySnapshot = await purchasesRef.get();
-    existingPins =
-        querySnapshot.docs.map((doc) => doc['pin'] as String).toList();
-
-    String newPin;
-    do {
-      newPin = (100 + random.nextInt(900)).toString();
-    } while (existingPins.contains(newPin));
-
-    return newPin;
-  }
-
-  Future<void> _logPurchase() async {
-    final user = fb_auth.FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    try {
-      final purchasesRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('purchases');
-      final totalCost = _calculateTotalCost();
-      final pin = await _generateUniquePin(user.uid);
-
-      final stationeryItems = _stationeryCart.entries.map((entry) {
-        final item = _stationeryItems.firstWhere((i) => i.id == entry.key);
-        return {
-          'id': item.id,
-          'name': item.name,
-          'price': item.price,
-          'quantity': entry.value,
-        };
-      }).toList();
-
-      Map<String, dynamic>? xeroxDetails;
-      if (_selectedFile != null && _fileUrl != null) {
-        xeroxDetails = {
-          'fileName': _selectedFile!.path.split('/').last,
-          'fileUrl': _fileUrl,
-          'copies': _copies,
-          'printType': _printType,
-          'printSide': _printSide,
-          'customInstructions': _customInstructions,
-        };
-      }
-
-      await purchasesRef.add({
-        'type': 'arcade',
-        'pin': pin,
-        'xeroxDetails': xeroxDetails,
-        'stationeryItems': stationeryItems,
-        'totalCost': totalCost,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      print('Error logging purchase: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error logging purchase: $e')),
-      );
-    }
   }
 
   void _selectFile() async {
@@ -170,18 +156,22 @@ class _ArcadeScreenState extends State<ArcadeScreen>
         file = File(result.files.single.path!);
         final user = fb_auth.FirebaseAuth.instance.currentUser;
         if (user == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Please sign in to upload files')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Please sign in to upload files')),
+            );
+          }
           return;
         }
 
         _instructionsFocusNode.unfocus();
 
         Future.microtask(() {
-          setState(() {
-            _isUploading = true;
-          });
+          if (mounted) {
+            setState(() {
+              _isUploading = true;
+            });
+          }
         });
 
         final fileName = file.path.split('/').last;
@@ -193,29 +183,39 @@ class _ArcadeScreenState extends State<ArcadeScreen>
         final downloadUrl = await snapshot.ref.getDownloadURL();
 
         Future.microtask(() {
-          setState(() {
-            _selectedFile = file;
-            _fileUrl = downloadUrl;
-            _isUploading = false;
-          });
+          if (mounted) {
+            setState(() {
+              _selectedFile = file;
+              _fileUrl = downloadUrl;
+              _isUploading = false;
+            });
+          }
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('File uploaded: $fileName')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('File uploaded: $fileName')),
+          );
+        }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No file selected')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No file selected')),
+          );
+        }
       }
     } catch (e) {
       Future.microtask(() {
-        setState(() {
-          _isUploading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isUploading = false;
+          });
+        }
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error uploading file: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error uploading file: $e')),
+        );
+      }
     }
   }
 
@@ -228,7 +228,11 @@ class _ArcadeScreenState extends State<ArcadeScreen>
       }
     }
     for (var entry in _stationeryCart.entries) {
-      final item = _stationeryItems.firstWhere((i) => i.id == entry.key);
+      final item = _stationeryItems.firstWhere(
+        (i) => i.id == entry.key,
+        orElse: () => StationeryItem(
+            id: entry.key, name: 'Unknown', price: 0, stock: 0, imageUrl: ''),
+      );
       total += item.price * entry.value;
     }
     return total;
@@ -236,18 +240,22 @@ class _ArcadeScreenState extends State<ArcadeScreen>
 
   void _proceedToPayment() async {
     if (_selectedFile == null && _stationeryCart.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Please select a file or add stationery items')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Please select a file or add stationery items')),
+        );
+      }
       return;
     }
 
     final totalCost = _calculateTotalCost();
     if (totalCost <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No items to purchase')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No items to purchase')),
+        );
+      }
       return;
     }
 
@@ -260,16 +268,21 @@ class _ArcadeScreenState extends State<ArcadeScreen>
     await _buttonController.forward();
     await _buttonController.reverse();
 
+// Create a copy of the cart before passing to PaymentScreen
+    final cartCopy = Map<int, int>.from(_stationeryCart);
+    debugPrint('Stationery cart before navigating to PaymentScreen: $cartCopy');
+
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PaymentScreen(
           file: _selectedFile,
+          fileUrl: _fileUrl,
           copies: _copies,
           isColor: _printType == 'Color',
           printSide: _printSide,
           customInstructions: _customInstructions,
-          stationeryCart: _stationeryCart,
+          stationeryCart: cartCopy,
           stationeryItems: _stationeryItems,
           foodCart: {},
           foodItems: [],
@@ -278,16 +291,17 @@ class _ArcadeScreenState extends State<ArcadeScreen>
       ),
     );
 
-    await _logPurchase();
-
-    setState(() {
-      _isProcessingPayment = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isProcessingPayment = false;
+      });
+    }
   }
 
   void _addToCart(int itemId) {
     setState(() {
       _stationeryCart[itemId] = (_stationeryCart[itemId] ?? 0) + 1;
+      debugPrint('Added item $itemId to cart. Current cart: $_stationeryCart');
     });
   }
 
@@ -296,6 +310,8 @@ class _ArcadeScreenState extends State<ArcadeScreen>
       if (_stationeryCart[itemId] != null && _stationeryCart[itemId]! > 0) {
         _stationeryCart[itemId] = _stationeryCart[itemId]! - 1;
         if (_stationeryCart[itemId] == 0) _stationeryCart.remove(itemId);
+        debugPrint(
+            'Removed item $itemId from cart. Current cart: $_stationeryCart');
       }
     });
   }
@@ -537,132 +553,169 @@ class _ArcadeScreenState extends State<ArcadeScreen>
                       ),
                     ),
                     const SizedBox(height: 12),
-                    ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      cacheExtent: 1000,
-                      itemCount: _stationeryItems.length,
-                      itemBuilder: (context, index) {
-                        final item = _stationeryItems[index];
-                        final quantity = _stationeryCart[item.id] ?? 0;
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12.0),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12.0),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(8.0),
-                            leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(8.0),
-                              child: Container(
-                                height: 80,
-                                width: 80,
-                                decoration: const BoxDecoration(
-                                  color: Colors.grey,
-                                ),
-                                child: Image.network(
-                                  item.imageUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Icon(Icons.error, size: 50),
-                                ),
-                              ),
-                            ),
-                            title: Text(
-                              item.name,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${item.price} RITZ',
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search stationery items...',
+                        hintStyle: TextStyle(color: Colors.grey[600]),
+                        prefixIcon:
+                            const Icon(Icons.search, color: Color(0xFF0C4D83)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12.0),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _isLoadingItems
+                        ? const Center(child: CircularProgressIndicator())
+                        : _filteredStationeryItems.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No items found',
                                   style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.teal[300],
-                                  ),
-                                ),
-                                Text(
-                                  'Stock: ${item.stock}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 16,
                                     color: Colors.grey,
                                   ),
                                 ),
-                              ],
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                GestureDetector(
-                                  onTap: () => _removeFromCart(item.id),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6.0),
+                              )
+                            : ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                cacheExtent: 1000,
+                                itemCount: _filteredStationeryItems.length,
+                                itemBuilder: (context, index) {
+                                  final item = _filteredStationeryItems[index];
+                                  final quantity =
+                                      _stationeryCart[item.id] ?? 0;
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 12.0),
                                     decoration: BoxDecoration(
-                                      color: Colors.grey[200],
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.remove,
-                                      size: 16,
-                                      color: Colors.black54,
-                                    ),
-                                  ),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8.0),
-                                  child: Text(
-                                    quantity.toString(),
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF0C4D83),
-                                    ),
-                                  ),
-                                ),
-                                GestureDetector(
-                                  onTap: () => _addToCart(item.id),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6.0),
-                                    decoration: BoxDecoration(
-                                      gradient: const LinearGradient(
-                                        colors: [
-                                          Color(0xFF0C4D83),
-                                          Color(0xFF64B5F6)
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.add,
-                                      size: 16,
                                       color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12.0),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.05),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                                    child: ListTile(
+                                      contentPadding: const EdgeInsets.all(8.0),
+                                      leading: ClipRRect(
+                                        borderRadius:
+                                            BorderRadius.circular(8.0),
+                                        child: Container(
+                                          height: 80,
+                                          width: 80,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.grey,
+                                          ),
+                                          child: Image.network(
+                                            item.imageUrl,
+                                            fit: BoxFit.cover,
+                                            errorBuilder:
+                                                (context, error, stackTrace) =>
+                                                    const Icon(Icons.error,
+                                                        size: 50),
+                                          ),
+                                        ),
+                                      ),
+                                      title: Flexible(
+                                        child: Text(
+                                          item.name,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.black87,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.visible,
+                                        ),
+                                      ),
+                                      subtitle: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${item.price} RITZ',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              color: Colors.teal[300],
+                                            ),
+                                          ),
+                                          Text(
+                                            'Stock: ${item.stock}',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () =>
+                                                _removeFromCart(item.id),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.all(6.0),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey[200],
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(
+                                                Icons.remove,
+                                                size: 16,
+                                                color: Colors.black54,
+                                              ),
+                                            ),
+                                          ),
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8.0),
+                                            child: Text(
+                                              quantity.toString(),
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                                color: Color(0xFF0C4D83),
+                                              ),
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () => _addToCart(item.id),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.all(6.0),
+                                              decoration: BoxDecoration(
+                                                gradient: const LinearGradient(
+                                                  colors: [
+                                                    Color(0xFF0C4D83),
+                                                    Color(0xFF64B5F6)
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                ),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(
+                                                Icons.add,
+                                                size: 16,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                   ],
                 ),
               ),

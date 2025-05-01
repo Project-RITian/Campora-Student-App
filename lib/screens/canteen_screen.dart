@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -14,13 +15,16 @@ class CanteenScreen extends StatefulWidget {
 
 class _CanteenScreenState extends State<CanteenScreen>
     with SingleTickerProviderStateMixin {
-  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
   final Map<String, int> _foodCart = {};
   late AnimationController _buttonController;
   late Animation<double> _buttonScaleAnimation;
   bool _isTakeaway = false;
   bool _isProcessingPayment = false;
   List<FoodItem> _foodItems = [];
+  List<FoodItem> _filteredFoodItems = [];
+  String _lastQuery = '';
+  Timer? _debounce;
   final List<String> _categories = [
     'Chinese',
     'Beverages',
@@ -41,10 +45,40 @@ class _CanteenScreenState extends State<CanteenScreen>
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
     );
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    // Debounce search input to prevent rapid setState calls
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      _updateFilteredItems();
+    });
+  }
+
+  void _updateFilteredItems() {
+    final query = _searchController.text.toLowerCase();
+    if (query == _lastQuery && _filteredFoodItems.isNotEmpty) {
+      // Skip filtering if query hasn't changed and filtered list is valid
+      return;
+    }
+    _lastQuery = query;
+    final List<FoodItem> filtered = query.isEmpty
+        ? List.from(_foodItems)
+        : _foodItems
+            .where((item) => item.name.toLowerCase().contains(query))
+            .toList();
+    if (mounted) {
+      setState(() {
+        _filteredFoodItems = filtered;
+      });
+    }
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _searchController.dispose();
     _buttonController.dispose();
     super.dispose();
   }
@@ -63,7 +97,9 @@ class _CanteenScreenState extends State<CanteenScreen>
       );
       return;
     }
-    setState(() => _foodCart[itemId] = (_foodCart[itemId] ?? 0) + 1);
+    setState(() {
+      _foodCart[itemId] = (_foodCart[itemId] ?? 0) + 1;
+    });
   }
 
   void _removeFromCart(String itemId) {
@@ -75,19 +111,36 @@ class _CanteenScreenState extends State<CanteenScreen>
     });
   }
 
-  List<FoodItem> _getFilteredItems(String category) {
-    return _foodItems.where((item) {
-      final matchesCategory = item.category == category;
-      final matchesSearch =
-          item.name.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
-    }).toList();
+  void _clearCart() {
+    setState(() {
+      _foodCart.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Cart cleared')),
+    );
+  }
+
+  List<FoodItem> _getFilteredItemsByCategory(String category) {
+    return _filteredFoodItems
+        .where((item) => item.category == category)
+        .toList();
   }
 
   double _calculateTotalCost() {
     double total = 0.0;
     _foodCart.forEach((itemId, qty) {
-      final item = _foodItems.firstWhere((food) => food.id == itemId);
+      final item = _foodItems.firstWhere(
+        (food) => food.id == itemId,
+        orElse: () => FoodItem(
+          id: itemId,
+          name: 'Unknown',
+          price: 0.0,
+          imageUrl: '',
+          stock: 0,
+          isInStock: false,
+          category: '',
+        ),
+      );
       total += item.price * qty;
     });
     if (_isTakeaway) total += 3.0;
@@ -119,6 +172,7 @@ class _CanteenScreenState extends State<CanteenScreen>
         MaterialPageRoute(
           builder: (context) => PaymentScreen(
             file: null,
+            fileUrl: null,
             copies: 0,
             isColor: false,
             printSide: '',
@@ -176,37 +230,46 @@ class _CanteenScreenState extends State<CanteenScreen>
     return Scaffold(
       appBar: CustomNavigationDrawer.buildAppBar(context, 'Canteen'),
       drawer: const CustomNavigationDrawer(),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance
-            .collection('foods')
-            .orderBy('createdAt', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            print('Error fetching food items: ${snapshot.error}');
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            print('No food items found');
-            return const Center(child: Text('No food items available'));
-          }
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0C4D83), Color(0xFF64B5F6)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('foods')
+              .orderBy('createdAt', descending: true)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              print('Error fetching food items: ${snapshot.error}');
+              return Center(child: Text('Error: ${snapshot.error}'));
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              print('No food items found');
+              return const Center(child: Text('No food items available'));
+            }
 
-          _foodItems = snapshot.data!.docs
-              .map((doc) => FoodItem.fromFirestore(doc))
-              .toList();
+            // Update _foodItems and schedule filter update
+            final newFoodItems = snapshot.data!.docs
+                .map((doc) => FoodItem.fromFirestore(doc))
+                .toList();
+            if (_foodItems != newFoodItems) {
+              _foodItems = newFoodItems;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  _updateFilteredItems();
+                }
+              });
+            }
 
-          return Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF0C4D83), Color(0xFF64B5F6)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: SingleChildScrollView(
+            return SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,19 +323,31 @@ class _CanteenScreenState extends State<CanteenScreen>
                   const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Text(
-                      'Total: ${_calculateTotalCost().toStringAsFixed(2)} RITZ',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Total: ${_calculateTotalCost().toStringAsFixed(2)} RITZ',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        if (totalItems > 0)
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.white),
+                            tooltip: 'Clear Cart',
+                            onPressed: _clearCart,
+                          ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: TextField(
+                      controller: _searchController,
                       decoration: InputDecoration(
                         hintText: 'Search for food or drinks...',
                         hintStyle: const TextStyle(color: Colors.grey),
@@ -287,20 +362,15 @@ class _CanteenScreenState extends State<CanteenScreen>
                             borderSide: BorderSide.none),
                       ),
                       style: const TextStyle(color: Colors.white),
-                      onChanged: (value) {
-                        setState(() {
-                          _searchQuery = value;
-                        });
-                      },
                     ),
                   ),
                   const SizedBox(height: 16),
-                  _foodItems.isEmpty
+                  _filteredFoodItems.isEmpty
                       ? const Center(
                           child: Padding(
                             padding: EdgeInsets.all(20.0),
                             child: Text(
-                              'No food items available',
+                              'No food items found',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 18,
@@ -314,7 +384,8 @@ class _CanteenScreenState extends State<CanteenScreen>
                           itemCount: _categories.length,
                           itemBuilder: (context, catIndex) {
                             final category = _categories[catIndex];
-                            final filteredItems = _getFilteredItems(category);
+                            final filteredItems =
+                                _getFilteredItemsByCategory(category);
                             if (filteredItems.isEmpty)
                               return const SizedBox.shrink();
                             return Column(
@@ -490,9 +561,9 @@ class _CanteenScreenState extends State<CanteenScreen>
                   const SizedBox(height: 70),
                 ],
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
       floatingActionButton: _isProcessingPayment
           ? const CircularProgressIndicator()

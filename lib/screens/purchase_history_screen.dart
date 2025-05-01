@@ -62,13 +62,18 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                 final purchase =
                     purchases[index].data() as Map<String, dynamic>;
                 final type = purchase['type'] ?? 'Unknown';
-                final pin = purchase['pin'] ?? 'N/A';
+                final pin = purchase['pin']?.toString() ?? 'N/A';
                 final totalCost =
-                    purchase['totalCost']?.toStringAsFixed(2) ?? '0.00';
+                    (purchase['totalCost'] as num?)?.toStringAsFixed(2) ??
+                        '0.00';
                 final timestamp =
                     (purchase['timestamp'] as Timestamp?)?.toDate();
-                final isTakeaway = purchase['isTakeaway'] ?? false;
-                final items = (purchase['items'] as List<dynamic>?) ?? [];
+                final isTakeaway = purchase['isTakeaway'] as bool? ?? false;
+                final items = (purchase['items'] as List<dynamic>?)
+                        ?.cast<Map<String, dynamic>>() ??
+                    [];
+                final xeroxDetails =
+                    purchase['xeroxDetails'] as Map<String, dynamic>?;
 
                 return GestureDetector(
                   onTap: () {
@@ -92,28 +97,137 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            '$type Purchase (PIN: $pin)',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF0C4D83),
-                            ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '$type Purchase (PIN: $pin)',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0C4D83),
+                                ),
+                              ),
+                              Text(
+                                'Total: $totalCost RITZ',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.teal[300],
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 8),
-                          Text('Total: $totalCost RITZ'),
+                          if (items.isNotEmpty) ...[
+                            const Text(
+                              'Items:',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF0C4D83),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            ...items.map((item) {
+                              final itemName =
+                                  item['name']?.toString() ?? 'Unknown';
+                              final itemPrice =
+                                  (item['price'] as num?)?.toStringAsFixed(2) ??
+                                      '0.00';
+                              final itemQuantity =
+                                  (item['quantity'] as num?)?.toString() ?? '0';
+                              final itemType =
+                                  item['type']?.toString() ?? 'Unknown';
+                              final itemTotal = (item['price'] as num? ??
+                                      0 * (item['quantity'] as num? ?? 0))
+                                  .toStringAsFixed(2);
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.only(left: 8.0, top: 2.0),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      '$itemType: $itemName x$itemQuantity',
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                    Text(
+                                      '$itemTotal RITZ',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.teal[300],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ],
+                          if (type == 'arcade' && xeroxDetails != null) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Xerox Details:',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF0C4D83),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'File: ${xeroxDetails['fileName']?.toString() ?? 'N/A'}',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                  Text(
+                                    'Copies: ${(xeroxDetails['copies'] as num?)?.toString() ?? '0'}',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                  Text(
+                                    'Print Type: ${xeroxDetails['printType'] == 'Color' ? 'Color' : 'B/W'}',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                  Text(
+                                    'Print Side: ${xeroxDetails['printSide']?.toString() ?? 'N/A'}',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                  if (xeroxDetails['customInstructions'] !=
+                                          null &&
+                                      (xeroxDetails['customInstructions']
+                                              as String)
+                                          .isNotEmpty)
+                                    Text(
+                                      'Instructions: ${xeroxDetails['customInstructions']}',
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                           if (type == 'canteen') ...[
-                            Text('Takeaway: ${isTakeaway ? "Yes" : "No"}'),
                             const SizedBox(height: 8),
                             Text(
-                              'Items: ${items.map((item) => "${item['name']} x${item['quantity']}").join(", ")}',
+                              'Takeaway: ${isTakeaway ? "Yes" : "No"}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Color(0xFF0C4D83),
+                              ),
                             ),
                           ],
                           const SizedBox(height: 8),
                           if (timestamp != null)
                             Text(
                               'Date: ${timestamp.toLocal().toString().split('.')[0]}',
-                              style: const TextStyle(color: Colors.grey),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
                             ),
                         ],
                       ),
