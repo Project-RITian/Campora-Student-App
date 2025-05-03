@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:ritian_v1/widgets/custom_navigation_drawer.dart';
 import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class LeaveOdScreen extends StatefulWidget {
   const LeaveOdScreen({super.key});
@@ -15,7 +18,6 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
   DateTime? _toDate;
   FilePickerResult? _attachment;
   final TextEditingController _reasonController = TextEditingController();
-  final List<LeaveOdApplication> _applications = [];
 
   Future<void> _selectDate(BuildContext context, bool isFromDate) async {
     final DateTime? picked = await showDatePicker(
@@ -50,18 +52,44 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
   }
 
   Future<void> _selectAttachment() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
-    );
-    if (result != null) {
-      setState(() {
-        _attachment = result;
-      });
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+      );
+      if (result != null) {
+        setState(() {
+          _attachment = result;
+        });
+      }
+    } catch (e) {
+      print('Error selecting attachment: $e'); // Log error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to select attachment: $e')),
+      );
     }
   }
 
-  void _submitApplication() {
+  Future<String?> _uploadAttachment(String filePath, String uid) async {
+    try {
+      File file = File(filePath);
+      String fileName = filePath.split('/').last;
+      Reference storageRef = FirebaseStorage.instance
+          .ref()
+          .child('leave_attachments/$uid/$fileName');
+      UploadTask uploadTask = storageRef.putFile(file);
+      TaskSnapshot snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      print('Error uploading attachment: $e'); // Log error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to upload attachment: $e')),
+      );
+      return null;
+    }
+  }
+
+  Future<void> _submitApplication() async {
     if (_fromDate == null ||
         _toDate == null ||
         _reasonController.text.isEmpty) {
@@ -78,32 +106,77 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
       return;
     }
 
-    setState(() {
-      _applications.add(LeaveOdApplication(
-        fromDate: _fromDate!,
-        toDate: _toDate!,
-        reason: _reasonController.text,
-        attachmentPath: _attachment?.files.single.path,
-        status: 'Waiting for Class Incharge Approval',
-      ));
-      _fromDate = null;
-      _toDate = null;
-      _attachment = null;
-      _reasonController.clear();
-    });
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      print('No authenticated user found'); // Log authentication issue
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not authenticated')),
+      );
+      return;
+    }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Application submitted successfully')),
-    );
+    String? attachmentUrl;
+    if (_attachment != null && _attachment!.files.single.path != null) {
+      attachmentUrl =
+          await _uploadAttachment(_attachment!.files.single.path!, user.uid);
+    }
+
+    final leaveData = {
+      'fromDate': Timestamp.fromDate(_fromDate!),
+      'toDate': Timestamp.fromDate(_toDate!),
+      'reason': _reasonController.text,
+      'attachmentUrl': attachmentUrl,
+      'status': 'requested',
+      'createdAt': Timestamp.now(),
+    };
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('leave_requests')
+          .doc(user.uid)
+          .collection('requests')
+          .add(leaveData);
+
+      setState(() {
+        _fromDate = null;
+        _toDate = null;
+        _attachment = null;
+        _reasonController.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Application submitted successfully')),
+      );
+    } catch (e) {
+      print('Error submitting application: $e'); // Log error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to submit application: $e')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      print('No authenticated user found'); // Log authentication issue
+      return Scaffold(
+        appBar: CustomNavigationDrawer.buildAppBar(context, 'Apply Leave/OD'),
+        drawer: const CustomNavigationDrawer(),
+        body: const Center(
+          child: Text(
+            'Please log in to apply for leave',
+            style: TextStyle(fontSize: 16, color: Colors.black54),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: CustomNavigationDrawer.buildAppBar(context, 'Apply Leave/OD'),
       drawer: const CustomNavigationDrawer(),
       body: Container(
-        color: Colors.white, // Changed to solid white background
+        color: Colors.white,
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -311,101 +384,120 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              _applications.isEmpty
-                  ? const Center(
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('leave_requests')
+                    .doc(user.uid)
+                    .collection('requests')
+                    .orderBy('createdAt', descending: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    print(
+                        'Firestore query error: ${snapshot.error}'); // Log error
+                    return Center(
+                      child: Text(
+                        'Error: ${snapshot.error}',
+                        style: const TextStyle(fontSize: 16, color: Colors.red),
+                      ),
+                    );
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    print(
+                        'No applications found for user: ${user.uid}'); // Log no data
+                    return const Center(
                       child: Text(
                         'No applications submitted yet',
                         style: TextStyle(fontSize: 16, color: Colors.black54),
                       ),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _applications.length,
-                      itemBuilder: (context, index) {
-                        final application = _applications[index];
-                        return Card(
-                          elevation: 6,
-                          margin: const EdgeInsets.only(bottom: 16.0),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16.0)),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            padding: const EdgeInsets.all(16.0),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16.0),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Application ${index + 1}',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF0C4D83),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'From: ${application.fromDate.day}/${application.fromDate.month}/${application.fromDate.year}',
-                                  style: const TextStyle(
-                                      fontSize: 16, color: Colors.black87),
-                                ),
-                                Text(
-                                  'To: ${application.toDate.day}/${application.toDate.month}/${application.toDate.year}',
-                                  style: const TextStyle(
-                                      fontSize: 16, color: Colors.black87),
-                                ),
-                                Text(
-                                  'Reason: ${application.reason}',
-                                  style: const TextStyle(
-                                      fontSize: 16, color: Colors.black87),
-                                ),
-                                if (application.attachmentPath != null)
-                                  Text(
-                                    'Attachment: ${application.attachmentPath!.split('/').last}',
-                                    style: const TextStyle(
-                                        fontSize: 16, color: Colors.teal),
-                                  ),
-                                const SizedBox(height: 16),
-                                StatusProgressLine(status: application.status),
-                              ],
-                            ),
+                    );
+                  }
+                  print(
+                      'Applications found: ${snapshot.data!.docs.length}'); // Log document count
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: snapshot.data!.docs.length,
+                    itemBuilder: (context, index) {
+                      final doc = snapshot.data!.docs[index];
+                      final data = doc.data() as Map<String, dynamic>;
+                      final fromDate = (data['fromDate'] as Timestamp).toDate();
+                      final toDate = (data['toDate'] as Timestamp).toDate();
+                      final reason = data['reason'] as String;
+                      final attachmentUrl = data['attachmentUrl'] as String?;
+                      final status = data['status'] as String;
+
+                      return Card(
+                        elevation: 6,
+                        margin: const EdgeInsets.only(bottom: 16.0),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16.0)),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          padding: const EdgeInsets.all(16.0),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16.0),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                    ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Application ${index + 1}',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0C4D83),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'From: ${fromDate.day}/${fromDate.month}/${fromDate.year}',
+                                style: const TextStyle(
+                                    fontSize: 16, color: Colors.black87),
+                              ),
+                              Text(
+                                'To: ${toDate.day}/${toDate.month}/${toDate.year}',
+                                style: const TextStyle(
+                                    fontSize: 16, color: Colors.black87),
+                              ),
+                              Text(
+                                'Reason: $reason',
+                                style: const TextStyle(
+                                    fontSize: 16, color: Colors.black87),
+                              ),
+                              if (attachmentUrl != null)
+                                Text(
+                                  'Attachment: ${attachmentUrl.split('/').last}',
+                                  style: const TextStyle(
+                                      fontSize: 16, color: Colors.teal),
+                                ),
+                              const SizedBox(height: 16),
+                              StatusProgressLine(status: status),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ],
           ),
         ),
       ),
     );
   }
-}
-
-class LeaveOdApplication {
-  final DateTime fromDate;
-  final DateTime toDate;
-  final String reason;
-  final String? attachmentPath;
-  String status;
-
-  LeaveOdApplication({
-    required this.fromDate,
-    required this.toDate,
-    required this.reason,
-    this.attachmentPath,
-    required this.status,
-  });
 }
 
 class StatusProgressLine extends StatelessWidget {
@@ -415,9 +507,33 @@ class StatusProgressLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isClassInchargeApproved =
-        status != 'Waiting for Class Incharge Approval';
-    final isHodApproved = status == 'Approved by HoD';
+    // Determine approval states and status text
+    final bool isClassInchargeApproved = status != 'requested';
+    final bool isHodApproved = status == 'approved';
+    String statusText;
+    List<Color> gradientColors;
+
+    switch (status.toLowerCase()) {
+      case 'requested':
+        statusText = 'Leave/OD Requested';
+        gradientColors = [Colors.grey, Colors.grey];
+        break;
+      case 'hod':
+        statusText = 'Waiting for HoD approval';
+        gradientColors = [Colors.green, Colors.grey];
+        break;
+      case 'approved':
+        statusText = 'Approved';
+        gradientColors = [Colors.green, Colors.green];
+        break;
+      case 'rejected':
+        statusText = 'Rejected';
+        gradientColors = [Colors.red, Colors.grey];
+        break;
+      default:
+        statusText = 'Unknown Status';
+        gradientColors = [Colors.grey, Colors.grey];
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -443,12 +559,9 @@ class StatusProgressLine extends StatelessWidget {
                   size: 24,
                 ),
                 const SizedBox(height: 4),
-                Text(
+                const Text(
                   'Class Incharge',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color:
-                          isClassInchargeApproved ? Colors.green : Colors.grey),
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -458,12 +571,7 @@ class StatusProgressLine extends StatelessWidget {
                 height: 4,
                 margin: const EdgeInsets.symmetric(horizontal: 8.0),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      isClassInchargeApproved ? Colors.green : Colors.grey,
-                      isHodApproved ? Colors.green : Colors.grey,
-                    ],
-                  ),
+                  gradient: LinearGradient(colors: gradientColors),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -476,16 +584,23 @@ class StatusProgressLine extends StatelessWidget {
                   size: 24,
                 ),
                 const SizedBox(height: 4),
-                Text(
+                const Text(
                   'HoD',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: isHodApproved ? Colors.green : Colors.grey),
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
               ],
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          statusText,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: status == 'rejected' ? Colors.red : Colors.black87,
+          ),
         ),
       ],
     );

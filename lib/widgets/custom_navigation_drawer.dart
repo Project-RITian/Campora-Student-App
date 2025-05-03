@@ -62,6 +62,13 @@ class CustomNavigationDrawer extends StatelessWidget {
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Icons.schedule),
+                  title: const Text('Timetable'),
+                  onTap: () {
+                    Navigator.pushNamed(context, '/timetable');
+                  },
+                ),
+                ListTile(
                   leading: const Icon(Icons.notes),
                   title: const Text('Assignment Submission'),
                   onTap: () {
