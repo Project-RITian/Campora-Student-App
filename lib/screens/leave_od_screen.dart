@@ -17,6 +17,9 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
   DateTime? _fromDate;
   DateTime? _toDate;
   FilePickerResult? _attachment;
+  String? _leaveType;
+  String? _odType;
+  double? _odHours;
   final TextEditingController _reasonController = TextEditingController();
 
   Future<void> _selectDate(BuildContext context, bool isFromDate) async {
@@ -63,7 +66,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
         });
       }
     } catch (e) {
-      print('Error selecting attachment: $e'); // Log error
+      print('Error selecting attachment: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to select attachment: $e')),
       );
@@ -81,7 +84,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
       TaskSnapshot snapshot = await uploadTask;
       return await snapshot.ref.getDownloadURL();
     } catch (e) {
-      print('Error uploading attachment: $e'); // Log error
+      print('Error uploading attachment: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to upload attachment: $e')),
       );
@@ -99,6 +102,20 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
       return;
     }
 
+    if (_leaveType == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a leave type')),
+      );
+      return;
+    }
+
+    if (_leaveType == 'OD' && (_odType == null || _odHours == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill all OD details')),
+      );
+      return;
+    }
+
     if (_toDate!.isBefore(_fromDate!)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('To date cannot be before From date')),
@@ -108,7 +125,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      print('No authenticated user found'); // Log authentication issue
+      print('No authenticated user found');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('User not authenticated')),
       );
@@ -122,6 +139,9 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
     }
 
     final leaveData = {
+      'leaveType': _leaveType,
+      'odType': _leaveType == 'OD' ? _odType : null,
+      'odHours': _leaveType == 'OD' ? _odHours : null,
       'fromDate': Timestamp.fromDate(_fromDate!),
       'toDate': Timestamp.fromDate(_toDate!),
       'reason': _reasonController.text,
@@ -141,6 +161,9 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
         _fromDate = null;
         _toDate = null;
         _attachment = null;
+        _leaveType = null;
+        _odType = null;
+        _odHours = null;
         _reasonController.clear();
       });
 
@@ -148,7 +171,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
         const SnackBar(content: Text('Application submitted successfully')),
       );
     } catch (e) {
-      print('Error submitting application: $e'); // Log error
+      print('Error submitting application: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to submit application: $e')),
       );
@@ -159,7 +182,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      print('No authenticated user found'); // Log authentication issue
+      print('No authenticated user found');
       return Scaffold(
         appBar: CustomNavigationDrawer.buildAppBar(context, 'Apply Leave/OD'),
         drawer: const CustomNavigationDrawer(),
@@ -292,6 +315,93 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
                       ),
                       const SizedBox(height: 24),
                       const Text(
+                        'Leave Type',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF0C4D83),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12.0),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[100],
+                        ),
+                        hint: const Text('Select Leave Type'),
+                        value: _leaveType,
+                        items: ['Leave', 'OD'].map((String type) {
+                          return DropdownMenuItem<String>(
+                            value: type,
+                            child: Text(type),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _leaveType = value;
+                            if (value != 'OD') {
+                              _odType = null;
+                              _odHours = null;
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                      if (_leaveType == 'OD') ...[
+                        const Text(
+                          'OD Details',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF0C4D83),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[100],
+                          ),
+                          hint: const Text('Select OD Type'),
+                          value: _odType,
+                          items: ['Internal', 'External'].map((String type) {
+                            return DropdownMenuItem<String>(
+                              value: type,
+                              child: Text(type),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _odType = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                            hintText: 'Enter OD Hours',
+                            filled: true,
+                            fillColor: Colors.grey[100],
+                          ),
+                          keyboardType: TextInputType.number,
+                          onChanged: (value) {
+                            setState(() {
+                              _odHours = double.tryParse(value);
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                      const Text(
                         'Attachment (Optional)',
                         style: TextStyle(
                           fontSize: 18,
@@ -396,8 +506,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
                     return const Center(child: CircularProgressIndicator());
                   }
                   if (snapshot.hasError) {
-                    print(
-                        'Firestore query error: ${snapshot.error}'); // Log error
+                    print('Firestore query error: ${snapshot.error}');
                     return Center(
                       child: Text(
                         'Error: ${snapshot.error}',
@@ -406,8 +515,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
                     );
                   }
                   if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    print(
-                        'No applications found for user: ${user.uid}'); // Log no data
+                    print('No applications found for user: ${user.uid}');
                     return const Center(
                       child: Text(
                         'No applications submitted yet',
@@ -415,8 +523,7 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
                       ),
                     );
                   }
-                  print(
-                      'Applications found: ${snapshot.data!.docs.length}'); // Log document count
+                  print('Applications found: ${snapshot.data!.docs.length}');
                   return ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -476,6 +583,23 @@ class _LeaveOdScreenState extends State<LeaveOdScreen> {
                                 style: const TextStyle(
                                     fontSize: 16, color: Colors.black87),
                               ),
+                              Text(
+                                'Leave Type: ${data['leaveType']}',
+                                style: const TextStyle(
+                                    fontSize: 16, color: Colors.black87),
+                              ),
+                              if (data['leaveType'] == 'OD') ...[
+                                Text(
+                                  'OD Type: ${data['odType']}',
+                                  style: const TextStyle(
+                                      fontSize: 16, color: Colors.black87),
+                                ),
+                                Text(
+                                  'OD Hours: ${data['odHours']}',
+                                  style: const TextStyle(
+                                      fontSize: 16, color: Colors.black87),
+                                ),
+                              ],
                               if (attachmentUrl != null)
                                 Text(
                                   'Attachment: ${attachmentUrl.split('/').last}',
@@ -507,7 +631,6 @@ class StatusProgressLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Determine approval states and status text
     final bool isClassInchargeApproved = status != 'requested';
     final bool isHodApproved = status == 'approved';
     String statusText;
