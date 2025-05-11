@@ -1,0 +1,2 @@
+/Volumes/MacSSD/RITian/RITian-Student-App/android/app/.cxx/Debug/56182d1q/x86_64/CMakeFiles/edit_cache.dir
+/Volumes/MacSSD/RITian/RITian-Student-App/android/app/.cxx/Debug/56182d1q/x86_64/CMakeFiles/rebuild_cache.dir

@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/custom_navigation_drawer.dart';
 import 'package:carousel_slider/carousel_slider.dart' as carousel_slider;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:provider/provider.dart';
+import '../providers/campus_status_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -153,6 +155,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     const Color primaryColor = Color(0xFF0C4D83);
+    // Access campus status from provider
+    final campusStatus = Provider.of<CampusStatusProvider>(context).campusStatus;
 
     final List<Map<String, dynamic>> quickLinks = [
       {
@@ -255,7 +259,48 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Home'),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Home'),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: campusStatus == 'In Campus'
+                    ? Colors.green.withOpacity(0.2)
+                    : Colors.red.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    campusStatus == 'In Campus'
+                        ? Icons.location_on
+                        : Icons.location_off,
+                    color: campusStatus == 'In Campus' ? Colors.green : Colors.red,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    campusStatus,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: campusStatus == 'In Campus' ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         elevation: 0,
       ),
       drawer: const CustomNavigationDrawer(),
@@ -780,19 +825,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class DetailsScreen extends StatelessWidget {
-  const DetailsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Details')),
-      drawer: const CustomNavigationDrawer(),
-      body: const Center(child: Text('Details Screen Content')),
     );
   }
 }

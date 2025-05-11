@@ -21,6 +21,7 @@ import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/payment_screen.dart';
 import 'firebase_options.dart';
+import 'providers/campus_status_provider.dart'; // Import the new provider
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -35,8 +36,11 @@ void main() async {
   }
 
   runApp(
-    ChangeNotifierProvider(
-      create: (context) => UserProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (context) => UserProvider()),
+        ChangeNotifierProvider(create: (context) => CampusStatusProvider()), // Add CampusStatusProvider
+      ],
       child: const MyApp(),
     ),
   );
@@ -54,6 +58,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Start checking location status
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<CampusStatusProvider>(context, listen: false)
+          .checkLocationAndUpdateStatus();
+    });
   }
 
   @override

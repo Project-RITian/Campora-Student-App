@@ -1,10 +1,12 @@
+// android/build.gradle
+
 buildscript {
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        // Add Google Services plugin for Firebase
+        classpath 'com.android.tools.build:gradle:8.6.0'  // ✅ Correct AGP version
         classpath 'com.google.gms:google-services:4.4.0'
     }
 }
