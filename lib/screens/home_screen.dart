@@ -35,7 +35,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      // Fetch the student's class from Firestore
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -62,7 +61,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // Fetch announcements
       final snapshot = await FirebaseFirestore.instance
           .collection('announcements')
           .orderBy('timestamp', descending: true)
@@ -155,8 +153,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     const Color primaryColor = Color(0xFF0C4D83);
-    // Access campus status from provider
-    final campusStatus = Provider.of<CampusStatusProvider>(context).campusStatus;
+    final campusStatus =
+        Provider.of<CampusStatusProvider>(context).campusStatus;
 
     final List<Map<String, dynamic>> quickLinks = [
       {
@@ -194,6 +192,12 @@ class _HomeScreenState extends State<HomeScreen> {
         'color': Colors.red,
         'route': '/purchase_history',
         'icon': FontAwesomeIcons.history
+      },
+      {
+        'text': 'Bus Tracking',
+        'color': Colors.teal,
+        'route': '/bus_tracking',
+        'icon': FontAwesomeIcons.bus
       },
     ];
 
@@ -284,7 +288,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     campusStatus == 'In Campus'
                         ? Icons.location_on
                         : Icons.location_off,
-                    color: campusStatus == 'In Campus' ? Colors.green : Colors.red,
+                    color:
+                        campusStatus == 'In Campus' ? Colors.green : Colors.red,
                     size: 16,
                   ),
                   const SizedBox(width: 4),
@@ -292,7 +297,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     campusStatus,
                     style: TextStyle(
                       fontSize: 12,
-                      color: campusStatus == 'In Campus' ? Colors.green : Colors.red,
+                      color: campusStatus == 'In Campus'
+                          ? Colors.green
+                          : Colors.red,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -307,7 +314,6 @@ class _HomeScreenState extends State<HomeScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          // Carousel at the top
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(15.0),
@@ -364,7 +370,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          // Announcements Section
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Column(
@@ -499,7 +504,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
           const SizedBox(height: 20),
-          // Quick Links Section
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Column(
@@ -606,7 +610,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          // Resources Section
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Column(
@@ -715,7 +718,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          // Applications Section
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Column(

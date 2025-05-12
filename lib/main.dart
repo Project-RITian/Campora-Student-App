@@ -3,25 +3,27 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import 'package:ritian_v1/screens/purchase_history_screen.dart';
-import 'package:ritian_v1/screens/timetable_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:ritian_v1/screens/arcade_screen.dart';
-import 'package:ritian_v1/screens/canteen_screen.dart';
-import 'package:ritian_v1/screens/payment_success_screen.dart';
-import 'package:ritian_v1/screens/under_construction_screen.dart';
-import 'package:ritian_v1/screens/ritz_purchase_screen.dart';
-import 'package:ritian_v1/screens/event_registration_screen.dart';
-import 'package:ritian_v1/screens/leave_od_screen.dart';
-import 'package:ritian_v1/screens/login_screen.dart';
-import 'package:ritian_v1/screens/first_time_sign_in_screen.dart';
-import 'package:ritian_v1/user_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/payment_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/first_time_sign_in_screen.dart';
+import 'screens/arcade_screen.dart';
+import 'screens/canteen_screen.dart';
+import 'screens/payment_success_screen.dart';
+import 'screens/under_construction_screen.dart';
+import 'screens/ritz_purchase_screen.dart';
+import 'screens/event_registration_screen.dart';
+import 'screens/leave_od_screen.dart';
+import 'screens/timetable_screen.dart';
+import 'screens/purchase_history_screen.dart';
+import 'screens/bus_tracking_screen.dart'; // Added
+import 'user_provider.dart';
+import 'providers/campus_status_provider.dart';
+import 'services/location_service.dart'; // Added
 import 'firebase_options.dart';
-import 'providers/campus_status_provider.dart'; // Import the new provider
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -39,7 +41,8 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (context) => UserProvider()),
-        ChangeNotifierProvider(create: (context) => CampusStatusProvider()), // Add CampusStatusProvider
+        ChangeNotifierProvider(create: (context) => CampusStatusProvider()),
+        ChangeNotifierProvider(create: (context) => LocationService()), // Added
       ],
       child: const MyApp(),
     ),
@@ -168,7 +171,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/exam_results': (context) => const UnderConstructionScreen(),
               '/fee_details': (context) => const UnderConstructionScreen(),
               '/purchase_history': (context) => const PurchaseHistoryScreen(),
-              '/bus_tracking': (context) => const UnderConstructionScreen(),
+              '/bus_tracking': (context) => const BusTrackingScreen(), // Added
             };
 
             final WidgetBuilder? builder = routes[settings.name];
